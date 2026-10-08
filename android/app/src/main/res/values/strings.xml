@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">یاد</string>
+    <string name="title_activity_main">یاد</string>
+    <string name="package_name">io.github.shahind.yaad</string>
+    <string name="custom_url_scheme">io.github.shahind.yaad</string>
+</resources>

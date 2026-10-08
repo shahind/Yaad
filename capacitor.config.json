@@ -1,0 +1,18 @@
+{
+  "appId": "io.github.shahind.yaad",
+  "appName": "Yaad",
+  "webDir": "www",
+  "backgroundColor": "#f4f6fa",
+  "android": {
+    "backgroundColor": "#f4f6fa"
+  },
+  "ios": {
+    "backgroundColor": "#f4f6fa",
+    "contentInset": "never"
+  },
+  "plugins": {
+    "StatusBar": {
+      "overlaysWebView": false
+    }
+  }
+}
