@@ -1,23 +1,23 @@
 <div align="center">
   <img src="www/icons/icon-192.png" width="96" alt="Yaad logo" />
   <h1>یاد · Yaad</h1>
-  <p><b>لغت‌نامهٔ دهخدا — سریع، سبک و کاملاً آفلاین</b><br/>
-  A fast, lightweight, fully offline Dehkhoda dictionary for Web, Android, iOS, Windows and Linux.</p>
-  <p><a href="https://shahind.github.io/Yaad/"><b>▶ Open the web version</b></a></p>
+  <p><b>لغت‌نامهٔ آفلاین دهخدا</b><br/>
+  <p><a href="https://shahind.github.io/Yaad/"><b>نسخه تحت وب</b></a></p>
 </div>
 
 ---
 
 ## Download
 
-| Platform | Get it |
+| Platform | Link |
 |---|---|
-| 🌐 Web | **[shahind.github.io/Yaad](https://shahind.github.io/Yaad/)** — installable as an app (PWA); Settings → “بارگیری همهٔ داده‌ها” caches the whole dictionary for offline use |
-| 🤖 Android | **[Yaad-1.0.0.apk](https://github.com/shahind/Yaad/releases/latest/download/Yaad-1.0.0.apk)** (signed release, ~61 MB, Android 7+) |
-| 🍏 iOS | **[Yaad-1.0.0-ios-unsigned.ipa](https://github.com/shahind/Yaad/releases/latest/download/Yaad-1.0.0-ios-unsigned.ipa)** — unsigned; install by re-signing with AltStore, Sideloadly or your own developer certificate |
-| 🪟 Windows / 🐧 Linux | build with `npm run dist:win` / `npm run dist:linux` (see below) |
+| 🌐 Web | **[shahind.github.io/Yaad](https://shahind.github.io/Yaad/)** — Inastallable as PWA with offline cache capability |
+| 🤖 Android | **[Yaad-1.0.0.apk](https://github.com/shahind/Yaad/releases/latest/download/Yaad-1.0.0.apk)** ( Android 7+) |
+| 🍏 iOS | **[Yaad-1.0.0-ios-unsigned.ipa](https://github.com/shahind/Yaad/releases/latest/download/Yaad-1.0.0-ios-unsigned.ipa)** Unsigned |
+| 🪟 Windows | **[Yaad V1.0.0 x64](https://github.com/shahind/Yaad/releases/download/v1.0.0/Yaad-Setup-1.0.0.exe)**|
+| 🪟 Windows - portable | **[Yaad V1.0.0 x64 Portable](https://github.com/shahind/Yaad/releases/download/v1.0.0/Yaad-Portable-1.0.0.exe)** |
 
-All downloads are on the [Releases page](https://github.com/shahind/Yaad/releases).
+All versions are available at [Releases Page](https://github.com/shahind/Yaad/releases).
 
 ## Features
 
