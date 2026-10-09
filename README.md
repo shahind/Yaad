@@ -8,6 +8,17 @@
 
 ---
 
+## Download
+
+| Platform | Get it |
+|---|---|
+| 🌐 Web | **[shahind.github.io/Yaad](https://shahind.github.io/Yaad/)** — installable as an app (PWA); Settings → “بارگیری همهٔ داده‌ها” caches the whole dictionary for offline use |
+| 🤖 Android | **[Yaad-1.0.0.apk](https://github.com/shahind/Yaad/releases/latest/download/Yaad-1.0.0.apk)** (signed release, ~61 MB, Android 7+) |
+| 🍏 iOS | **[Yaad-1.0.0-ios-unsigned.ipa](https://github.com/shahind/Yaad/releases/latest/download/Yaad-1.0.0-ios-unsigned.ipa)** — unsigned; install by re-signing with AltStore, Sideloadly or your own developer certificate |
+| 🪟 Windows / 🐧 Linux | build with `npm run dist:win` / `npm run dist:linux` (see below) |
+
+All downloads are on the [Releases page](https://github.com/shahind/Yaad/releases).
+
 ## Features
 
 - **Instant search** over all 312,507 Dehkhoda entries plus 54,008 sub-entry phrases
@@ -99,7 +110,19 @@ npm run android         # open in Android Studio (or: cd android && ./gradlew as
 npm run ios             # open in Xcode (macOS)
 ```
 
-**Web (GitHub Pages)** — the `gh-pages` branch contains the contents of `www/` (including `data/`).
+Signed Android release: create a keystore, put `storeFile`, `storePassword`, `keyAlias` and
+`keyPassword` in a properties file **outside the repo**, then
+
+```bash
+YAAD_KEYSTORE_PROPERTIES=/path/to/keystore.properties ./gradlew assembleRelease   # in android/
+```
+
+**iOS IPA (CI)** — publishing a GitHub release runs [`.github/workflows/ios.yml`](.github/workflows/ios.yml),
+which builds an unsigned `.ipa` on macOS and attaches it to the release (it can also be started
+manually from the Actions tab with a tag).
+
+**Web (GitHub Pages)** — `npm run build:data && bash tools/deploy-pages.sh` publishes `www/`
+(including `data/`) to the `gh-pages` branch.
 
 ## Credits & license
 
