@@ -1181,3 +1181,15 @@ mark {
     font-size: 0.74rem;
   }
 }
+
+/* The icon sprite must take no space: a global svg size would otherwise make the page
+   taller than the window, letting iOS scroll the whole app under the status bar. */
+svg.sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+html {
+  overflow: hidden;
+}
