@@ -11,13 +11,21 @@
 
 | Platform | Link |
 |---|---|
-| 🌐 Web | **[shahind.github.io/Yaad](https://shahind.github.io/Yaad/)** — Inastallable as PWA with offline cache capability |
-| 🤖 Android | **[Yaad-1.0.0.apk](https://github.com/shahind/Yaad/releases/latest/download/Yaad-1.0.0.apk)** ( Android 7+) |
-| 🍏 iOS | **[Yaad-1.0.0-ios-unsigned.ipa](https://github.com/shahind/Yaad/releases/latest/download/Yaad-1.0.0-ios-unsigned.ipa)** Unsigned |
-| 🪟 Windows | **[Yaad V1.0.0 x64](https://github.com/shahind/Yaad/releases/download/v1.0.0/Yaad-Setup-1.0.0.exe)**|
-| 🪟 Windows - portable | **[Yaad V1.0.0 x64 Portable](https://github.com/shahind/Yaad/releases/download/v1.0.0/Yaad-Portable-1.0.0.exe)** |
+| 🌐 Web | **[shahind.github.io/Yaad](https://shahind.github.io/Yaad/)** — installable as a PWA; Settings → «بارگیری همهٔ داده‌ها» makes it fully offline |
+| 🤖 Android | **[Yaad-1.0.1.apk](https://github.com/shahind/Yaad/releases/download/v1.0.1/Yaad-1.0.1.apk)** (Android 7+) |
+| 🍏 iOS | **[Yaad-1.0.1-ios-unsigned.ipa](https://github.com/shahind/Yaad/releases/download/v1.0.1/Yaad-1.0.1-ios-unsigned.ipa)** — unsigned; sign with AltStore / Sideloadly |
+| 🪟 Windows | **[Yaad V1.0.1 x64](https://github.com/shahind/Yaad/releases/download/v1.0.1/Yaad-Setup-1.0.1.exe)** — silent install: `Yaad-Setup-1.0.1.exe /S` |
+| 🪟 Windows - portable | **[Yaad V1.0.1 x64 Portable](https://github.com/shahind/Yaad/releases/download/v1.0.1/Yaad-Portable-1.0.1.exe)** |
+| 🐧 Linux | **[AppImage](https://github.com/shahind/Yaad/releases/download/v1.0.1/Yaad-1.0.1.AppImage)** · **[.deb](https://github.com/shahind/Yaad/releases/download/v1.0.1/yaad_1.0.1_amd64.deb)** |
 
 All versions are available at [Releases Page](https://github.com/shahind/Yaad/releases).
+
+### Microsoft Store
+
+The [desktop workflow](.github/workflows/desktop.yml) also builds a Store package (`Yaad-<version>-store.appx`, MSIX)
+once the Partner Center identity is set as repository variables (`MS_STORE_IDENTITY_NAME`, `MS_STORE_PUBLISHER`,
+`MS_STORE_PUBLISHER_NAME` — from Partner Center → the app → Product identity). Upload that file in the submission;
+Microsoft signs it, so no code-signing certificate is needed.
 
 ## Features
 

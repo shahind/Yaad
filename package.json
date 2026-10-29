@@ -1,6 +1,6 @@
 {
   "name": "yaad",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Yaad (یاد) — fast, lightweight, fully offline Dehkhoda dictionary for web, Android, iOS, Windows and Linux",
   "author": {
@@ -89,6 +89,24 @@
       ],
       "category": "public.app-category.reference",
       "icon": "resources/icon-only.png"
-    }
+    },
+    "appx": {
+      "applicationId": "Yaad",
+      "displayName": "یاد — لغت‌نامهٔ دهخدا",
+      "identityName": "Shahin.Yaad",
+      "publisher": "CN=Shahin",
+      "publisherDisplayName": "Shahin",
+      "backgroundColor": "#ffffff",
+      "languages": [
+        "fa-IR",
+        "en-US"
+      ],
+      "showNameOnTiles": false,
+      "artifactName": "${productName}-${version}-store.${ext}"
+    },
+    "electronLanguages": [
+      "fa",
+      "en-US"
+    ]
   }
 }

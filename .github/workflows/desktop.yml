@@ -1,0 +1,77 @@
+name: Desktop builds
+
+# On a published release: Windows installer + portable, Linux AppImage + deb, and (when the
+# Partner Center identity is configured) a Microsoft Store MSIX — all attached to the release.
+#
+# Microsoft Store: reserve the app in Partner Center, open Product identity, and add these
+# repository variables (Settings → Secrets and variables → Actions → Variables):
+#   MS_STORE_IDENTITY_NAME    Package/Identity/Name            e.g. 12345Shahin.Yaad
+#   MS_STORE_PUBLISHER        Package/Identity/Publisher       e.g. CN=1A2B3C4D-....
+#   MS_STORE_PUBLISHER_NAME   Package/Properties/PublisherDisplayName
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to attach the builds to (e.g. v1.0.1)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            targets: --win nsis portable
+          - os: ubuntu-latest
+            targets: --linux AppImage deb
+    runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build dictionary data
+        run: npm run build:data
+
+      - name: Search smoke test
+        run: npm test
+
+      - name: Package
+        shell: bash
+        run: npx electron-builder ${{ matrix.targets }} --publish never
+
+      - name: Microsoft Store package (MSIX)
+        if: runner.os == 'Windows' && vars.MS_STORE_IDENTITY_NAME != ''
+        shell: bash
+        run: >
+          npx electron-builder --win appx --publish never
+          -c.appx.identityName="${{ vars.MS_STORE_IDENTITY_NAME }}"
+          -c.appx.publisher="${{ vars.MS_STORE_PUBLISHER }}"
+          -c.appx.publisherDisplayName="${{ vars.MS_STORE_PUBLISHER_NAME }}"
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: |
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.appx
