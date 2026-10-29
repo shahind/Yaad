@@ -700,9 +700,9 @@ async function downloadAll() {
   btn.disabled = true;
   bar.hidden = false;
   const meta = await fetch('data/meta.json', { cache: 'no-cache' }).then((r) => r.json());
-  const files = ['data/words.bin', 'data/phrases.bin', 'data/phrase-parents.bin'];
-  for (let i = 0; i < meta.blockStarts.length; i++) files.push(`data/m/${i}.bin`);
-  for (let i = 0; i < meta.shards; i++) files.push(`data/t/${i}.bin`);
+  const files = ['data/words.txt', 'data/phrases.txt', 'data/phrase-parents.txt'];
+  for (let i = 0; i < meta.blockStarts.length; i++) files.push(`data/m/${i}.txt`);
+  for (let i = 0; i < meta.shards; i++) files.push(`data/t/${i}.txt`);
   for (let i = 0; i < files.length; i++) files[i] += `?v=${meta.build}`;
   const cache = await caches.open('yaad-data-v1');
   let done = 0;

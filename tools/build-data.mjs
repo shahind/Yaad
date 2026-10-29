@@ -2,11 +2,11 @@
 //
 // Output:
 //   meta.json                 counts, block table, shard count, stopwords
-//   words.bin                 gzip text: one display headword per line, line i = entry i
-//   phrases.bin               gzip text: one sub-entry phrase per line (e.g. «به یاد آوردن» inside «یاد»)
-//   phrase-parents.bin        gzip Uint32 LE: parent entry id of each phrase line
-//   m/<n>.bin                 gzip text blocks of meanings: records "pron \x1f body" joined by \x1e
-//   t/<n>.bin                 gzip inverted-index shards for full-text (meaning) search
+//   words.txt                 gzip text: one display headword per line, line i = entry i
+//   phrases.txt               gzip text: one sub-entry phrase per line (e.g. «به یاد آوردن» inside «یاد»)
+//   phrase-parents.txt        gzip Uint32 LE: parent entry id of each phrase line
+//   m/<n>.txt                 gzip text blocks of meanings: records "pron \x1f body" joined by \x1e
+//   t/<n>.txt                 gzip inverted-index shards for full-text (meaning) search
 //
 // Meaning markup (control chars instead of HTML, rendered by the app):
 //   \n line break, \x01 new sense (◄), \x02..\x03 citation, \x04 sub-entry (♦),
@@ -156,7 +156,7 @@ let block = [];
 const flushBlock = () => {
   if (!block.length) return;
   rawMeaningBytes += block.length;
-  packedBytes += write(`m/${blockStarts.length - 1}.bin`, gz(Buffer.from(block)));
+  packedBytes += write(`m/${blockStarts.length - 1}.txt`, gz(Buffer.from(block)));
   block = [];
 };
 records.forEach((rec, id) => {
@@ -168,10 +168,10 @@ records.forEach((rec, id) => {
 flushBlock();
 console.timeEnd('convert');
 
-const wordsBytes = write('words.bin', gz(Buffer.from(words.join('\n'), 'utf8')));
-const phrasesBytes = write('phrases.bin', gz(Buffer.from(phraseTexts.join('\n'), 'utf8')));
+const wordsBytes = write('words.txt', gz(Buffer.from(words.join('\n'), 'utf8')));
+const phrasesBytes = write('phrases.txt', gz(Buffer.from(phraseTexts.join('\n'), 'utf8')));
 const pp = new Uint32Array(phraseParents);
-const ppBytes = write('phrase-parents.bin', gz(Buffer.from(pp.buffer)));
+const ppBytes = write('phrase-parents.txt', gz(Buffer.from(pp.buffer)));
 
 // ---------------------------------------------------------------------------
 // Full-text index. Score per (token, entry) = BM25 term weight × early-position boost,
@@ -300,7 +300,7 @@ for (let g = 0; g < groups.length; ) {
       postingCount += e.count;
     }
   }
-  indexBytes += write(`t/${shardCount}.bin`, gz(Buffer.concat([Buffer.from(head), Buffer.from(body)])));
+  indexBytes += write(`t/${shardCount}.txt`, gz(Buffer.concat([Buffer.from(head), Buffer.from(body)])));
   shardCount++;
 }
 console.log('index shards', shardCount, 'keys', shardKeys.length);

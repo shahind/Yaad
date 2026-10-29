@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'www');
+const NAME = JSON.parse(fs.readFileSync(path.join(ROOT, '..', 'package.json'), 'utf8')).name;
 const PORT = +(process.argv[2] || process.env.PORT || 5173);
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -14,7 +15,6 @@ const TYPES = {
   '.webmanifest': 'application/manifest+json',
   '.png': 'image/png',
   '.woff2': 'font/woff2',
-  '.bin': 'application/octet-stream',
   '.txt': 'text/plain; charset=utf-8',
 };
 
@@ -34,4 +34,4 @@ http
       fs.createReadStream(file).pipe(res);
     });
   })
-  .listen(PORT, () => console.log(`Yaad dev server: http://localhost:${PORT}`));
+  .listen(PORT, () => console.log(`${NAME} dev server: http://localhost:${PORT}`));

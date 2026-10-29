@@ -55,10 +55,10 @@ The SQL dumps in `DB/` (one per starting letter) are converted once by
 
 | File | Content |
 |---|---|
-| `words.bin` | every headword, one per line (gzip). Loaded at startup. |
-| `phrases.bin`, `phrase-parents.bin` | sub-entry phrases (♦ …؛) and the entry each belongs to. |
-| `m/<n>.bin` | meanings in ~64 KB blocks. HTML is reduced to a tiny control-character markup and text is transcoded to a **single-byte charset** (Persian letters are 2 bytes in UTF‑8) before gzip — 16 % smaller than gzip alone. |
-| `t/<n>.bin` | full-text inverted index, **sharded by token prefix** (a size-bounded trie), so a query loads only the shards it needs and can expand prefixes («یاد» → «یادگار»…). Postings are delta + varint encoded with a 4-bit relevance score (BM25 × position × synonym boost). |
+| `words.txt` | every headword, one per line (gzip). Loaded at startup. |
+| `phrases.txt`, `phrase-parents.txt` | sub-entry phrases (♦ …؛) and the entry each belongs to. |
+| `m/<n>.txt` | meanings in ~64 KB blocks. HTML is reduced to a tiny control-character markup and text is transcoded to a **single-byte charset** (Persian letters are 2 bytes in UTF‑8) before gzip — 16 % smaller than gzip alone. |
+| `t/<n>.txt` | full-text inverted index, **sharded by token prefix** (a size-bounded trie), so a query loads only the shards it needs and can expand prefixes («یاد» → «یادگار»…). Postings are delta + varint encoded with a 4-bit relevance score (BM25 × position × synonym boost). |
 | `meta.json` | block table, shard table, charset, stop-words, build id. |
 
 Why not one file per letter? A word can appear anywhere: «یاد» must match «به یاد آوردن»

@@ -82,9 +82,9 @@ function buildList(text) {
 async function init() {
   meta = await fetch(new URL('meta.json', DATA), { cache: 'no-cache' }).then((r) => r.json());
   const [w, p, pp] = await Promise.all([
-    fetchBin('words.bin'),
-    fetchBin('phrases.bin'),
-    fetchBin('phrase-parents.bin'),
+    fetchBin('words.txt'),
+    fetchBin('phrases.txt'),
+    fetchBin('phrase-parents.txt'),
   ]);
   charTable = new Uint16Array(256);
   for (let i = 0; i < meta.charset.length; i++) charTable[i] = meta.charset.charCodeAt(i);
@@ -138,7 +138,7 @@ async function loadBlock(b) {
     blockCache.set(b, entry);
     return entry;
   }
-  entry = fetchBin(`m/${b}.bin`).then(decodeBlock);
+  entry = fetchBin(`m/${b}.txt`).then(decodeBlock);
   blockCache.set(b, entry);
   if (blockCache.size > BLOCK_CACHE) blockCache.delete(blockCache.keys().next().value);
   try {
@@ -329,7 +329,7 @@ async function loadShard(s) {
     shardCache.set(s, entry);
     return entry;
   }
-  entry = fetchBin(`t/${s}.bin`).then((buf) => {
+  entry = fetchBin(`t/${s}.txt`).then((buf) => {
     const st = { p: 0 };
     const n = readVarint(buf, st);
     const heads = [];
