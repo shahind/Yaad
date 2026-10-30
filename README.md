@@ -12,11 +12,11 @@
 | Platform | Link |
 |---|---|
 | 🌐 Web | **[shahind.github.io/Yaad](https://shahind.github.io/Yaad/)** — installable as a PWA; Settings → «بارگیری همهٔ داده‌ها» makes it fully offline |
-| 🤖 Android | **[Yaad-1.0.1.apk](https://github.com/shahind/Yaad/releases/download/v1.0.1/Yaad-1.0.1.apk)** (Android 7+) |
-| 🍏 iOS | **[Yaad-1.0.1-ios-unsigned.ipa](https://github.com/shahind/Yaad/releases/download/v1.0.1/Yaad-1.0.1-ios-unsigned.ipa)** — unsigned; sign with AltStore / Sideloadly |
-| 🪟 Windows | **[Yaad V1.0.1 x64](https://github.com/shahind/Yaad/releases/download/v1.0.1/Yaad-Setup-1.0.1.exe)** — silent install: `Yaad-Setup-1.0.1.exe /S` |
-| 🪟 Windows - portable | **[Yaad V1.0.1 x64 Portable](https://github.com/shahind/Yaad/releases/download/v1.0.1/Yaad-Portable-1.0.1.exe)** |
-| 🐧 Linux | **[AppImage](https://github.com/shahind/Yaad/releases/download/v1.0.1/Yaad-1.0.1.AppImage)** · **[.deb](https://github.com/shahind/Yaad/releases/download/v1.0.1/yaad_1.0.1_amd64.deb)** |
+| 🤖 Android | **[Yaad-1.0.2.apk](https://github.com/shahind/Yaad/releases/download/v1.0.2/Yaad-1.0.2.apk)** (Android 7+) |
+| 🍏 iOS | **[Yaad-1.0.2-ios-unsigned.ipa](https://github.com/shahind/Yaad/releases/download/v1.0.2/Yaad-1.0.2-ios-unsigned.ipa)** — unsigned; sign with AltStore / Sideloadly |
+| 🪟 Windows | **[Yaad V1.0.2 x64](https://github.com/shahind/Yaad/releases/download/v1.0.2/Yaad-Setup-1.0.2.exe)** — silent install: `Yaad-Setup-1.0.2.exe /S` |
+| 🪟 Windows - portable | **[Yaad V1.0.2 x64 Portable](https://github.com/shahind/Yaad/releases/download/v1.0.2/Yaad-Portable-1.0.2.exe)** |
+| 🐧 Linux | **[AppImage](https://github.com/shahind/Yaad/releases/download/v1.0.2/Yaad-1.0.2.AppImage)** · **[.deb](https://github.com/shahind/Yaad/releases/download/v1.0.2/yaad_1.0.2_amd64.deb)** |
 
 All versions are available at [Releases Page](https://github.com/shahind/Yaad/releases).
 
