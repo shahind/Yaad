@@ -767,7 +767,7 @@ function handleLaunchUrls() {
   const open = (url) => {
     try {
       const q = new URL(url).searchParams.get('q');
-      if (q) lookupFromOutside(q, true);
+      if (q) lookupFromOutside(q, false); // show the results; the user picks the entry
     } catch (e) {
       /* not a look-up link */
     }
