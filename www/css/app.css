@@ -182,14 +182,21 @@ svg {
     transform: none;
     visibility: visible;
   }
+  /* The entry bar itself reaches up under the status bar (see .entry-top below). */
   .view {
-    padding-top: var(--safe-top);
+    padding-top: 0;
   }
 }
 
 /* ------------------------------------------------------------------ appbar */
 
+/* Sticky with an opaque background: iOS Safari tints the status bar from a fixed/sticky top
+   bar; without one it fades the page into the status-bar area. */
 .appbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1192,4 +1199,13 @@ svg.sprite {
 }
 html {
   overflow: hidden;
+}
+
+/* Phones: the entry bar reaches up under the status bar, opaque so iOS tints the status bar
+   with it (the view itself no longer pads for the status bar). */
+@media (max-width: 860px) {
+  .entry-top {
+    padding-top: calc(10px + var(--safe-top));
+    background: var(--bg);
+  }
 }
