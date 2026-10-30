@@ -742,11 +742,42 @@ function route() {
   else {
     main = false;
     showPlaceholder();
+    // Look-ups from other apps (e.g. Doost): #/?q=word[&go=1]
+    if (params.get('q')) lookupFromOutside(params.get('q'), params.get('go') === '1');
   }
   el.app.classList.toggle('show-main', main);
   $('#btn-lists').classList.toggle('active', parts[0] === 'lists');
 }
 window.addEventListener('hashchange', route);
+
+// Shows the results for a word sent by another app; with `go`, opens the exact headword too.
+// The query leaves the URL first so going back from the entry doesn't repeat the look-up.
+async function lookupFromOutside(q, go) {
+  history.replaceState(null, '', '#/');
+  el.q.value = q;
+  await runSearch(q);
+  const exact = search.head.find((h) => h.tier === 0 && !h.phrase);
+  if (go && exact) location.hash = entryHref(exact.id);
+}
+
+// Native app: yaad://search?q=word (from Doost or any other app), on launch or while running.
+function handleLaunchUrls() {
+  if (!isNative) return;
+  const App = plugin('App');
+  const open = (url) => {
+    try {
+      const q = new URL(url).searchParams.get('q');
+      if (q) lookupFromOutside(q, true);
+    } catch (e) {
+      /* not a look-up link */
+    }
+  };
+  App?.addListener?.('appUrlOpen', (e) => open(e.url));
+  App?.getLaunchUrl?.()
+    .then((r) => r?.url && open(r.url))
+    .catch(() => {});
+}
+
 store.onChange(() => {
   if (!el.home.hidden && !search.q) renderHome();
 });
@@ -762,6 +793,7 @@ call('init')
     setTimeout(() => $('#splash').remove(), 400);
     renderHome();
     route();
+    handleLaunchUrls();
     if (!mobile()) el.q.focus();
     // Web: drop cached data files from older dictionary builds.
     if ('caches' in window && !isNative && !isElectron) {

@@ -40,6 +40,9 @@ Microsoft signs it, so no code-signing certificate is needed.
 - **Dark / light / automatic theme**, adjustable reading size, recent history, random word.
 - Desktop two-pane layout, phone single-pane layout, keyboard navigation (`/`, arrows, Enter, Esc),
   double-click any word inside a meaning to look it up.
+- **Look-ups from other apps** (e.g. [Doost](https://github.com/shahind/Doost)): the app opens
+  `yaad://search?q=word`, the web version `https://shahind.github.io/Yaad/#/?q=word&go=1`
+  (`go=1` opens the exact headword directly).
 - **100% offline**: the dictionary ships inside the app; nothing is ever downloaded at runtime.
   The web version caches what you use (or everything, from Settings) with a service worker.
 
