@@ -43,7 +43,7 @@ async function api(method, path, body) {
 const must = async (label, p) => {
   const r = await p;
   if (!r.ok) die(`${label} failed: HTTP ${r.status} ${JSON.stringify(r.data)}`);
-  console.log(`✓ ${label}`);
+  console.log(`✓ ${label}${r.data?.message ? ` — ${r.data.message}` : ''}`);
   return r.data;
 };
 const upload = async (path, field, file) => {
@@ -64,8 +64,9 @@ console.log(`AAB ${aab}\nBIN ${bin}\nchangelog fa: ${notes.fa || '(empty)'}\ncha
 console.log(`rollout ${commitBody.staged_rollout_percentage}%, auto-publish ${commitBody.auto_publish}`);
 if (dryRun) { console.log('dry run: nothing sent'); process.exit(0); }
 
+// Pishkhan answers "no draft" with HTTP 200 and type "not-exists".
 const draft = await api('GET', '/apps/releases/last-uncommitted/');
-if (draft.ok) console.log('✓ using the existing draft release');
+if (draft.ok && draft.data?.type === 'success') console.log('✓ using the existing draft release');
 else await must('create draft release', api('POST', '/apps/releases/'));
 
 await must('upload AAB', upload('/apps/releases/upload-aab/', 'aab', aab));
