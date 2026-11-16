@@ -21,6 +21,7 @@ android {
     def ksProps = new Properties()
     def ksPath = System.getenv('YAAD_KEYSTORE_PROPERTIES')
     if (ksPath && file(ksPath).exists()) file(ksPath).withInputStream { ksProps.load(it) }
+    project.ext.releaseKs = ksProps
     signingConfigs {
         release {
             if (ksProps['storeFile']) {
@@ -68,3 +69,25 @@ try {
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
 }
+
+// Cafe Bazaar: every signed bundleRelease also writes app-release.bin (the signed digest
+// Bazaar asks for) next to app-release.aab, using tools/bazaar/bundlesigner. Set
+// bundleSigner=<path to jar> in the keystore properties to use a different jar.
+tasks.register('bazaarBin', Exec) {
+    def ks = project.ext.releaseKs
+    def aab = file("$buildDir/outputs/bundle/release/app-release.aab")
+    def jar = file(ks['bundleSigner'] ?: "$rootDir/../tools/bazaar/bundlesigner-0.1.14.jar")
+    onlyIf {
+        def ok = ks['storeFile'] && jar.exists() && aab.exists()
+        if (!ok) logger.warn("bazaarBin skipped: needs the release keystore, ${jar} and ${aab.name}")
+        ok
+    }
+    commandLine "${System.getProperty('java.home')}/bin/java", '-jar', jar,
+        'genbin', '-v', '--bundle', aab, '--bin', aab.parentFile,
+        '--v2-signing-enabled', 'true', '--v3-signing-enabled', 'false',
+        '--ks', ks['storeFile'] ? file(ks['storeFile']) : '', '--ks-key-alias', ks['keyAlias'] ?: '',
+        '--ks-pass', 'env:BAZAAR_KS_PASS', '--key-pass', 'env:BAZAAR_KEY_PASS'
+    environment 'BAZAAR_KS_PASS', ks['storePassword'] ?: ''
+    environment 'BAZAAR_KEY_PASS', ks['keyPassword'] ?: ''
+}
+afterEvaluate { tasks.named('bundleRelease') { finalizedBy 'bazaarBin' } }

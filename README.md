@@ -135,6 +135,7 @@ Signed Android release: create a keystore, put `storeFile`, `storePassword`, `ke
 
 ```bash
 YAAD_KEYSTORE_PROPERTIES=/path/to/keystore.properties ./gradlew assembleRelease   # in android/
+YAAD_KEYSTORE_PROPERTIES=/path/to/keystore.properties ./gradlew bundleRelease     # .aab + Cafe Bazaar .bin
 ```
 
 **iOS IPA (CI)** — publishing a GitHub release runs [`.github/workflows/ios.yml`](.github/workflows/ios.yml),
