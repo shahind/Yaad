@@ -1,0 +1,115 @@
+name: Cafe Bazaar release
+
+# On a published GitHub release: build the signed App Bundle (Gradle also writes the Cafe
+# Bazaar .bin, see bazaarBin in android/app/build.gradle), attach both to the release, and
+# send them to Cafe Bazaar for review through the Pishkhan API (tools/bazaar-publish.mjs).
+# Changelogs come from the "What's new" section of store/play-listing.md, and the
+# versionCode in android/app/build.gradle must be higher than the one live on Bazaar.
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   ANDROID_KEYSTORE_BASE64    base64 of the release .jks
+#   ANDROID_KEYSTORE_PASSWORD  keystore password
+#   ANDROID_KEY_ALIAS          key alias
+#   ANDROID_KEY_PASSWORD       key password
+#   BAZAAR_API_SECRET          Pishkhan API token of this app (without it the bundle is only
+#                              built and attached to the release, not sent to Bazaar)
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build (e.g. v1.1.2)'
+        required: true
+      publish:
+        description: 'Send to Cafe Bazaar'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  bazaar:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      APP: Yaad
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      BAZAAR_API_SECRET: ${{ secrets.BAZAAR_API_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build app data
+        run: npm run build:data
+
+      - name: Search smoke test
+        run: npm test
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+
+      - name: Keystore
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KS_B64" ]; then echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set"; exit 1; fi
+          mkdir -p "$RUNNER_TEMP/ks"
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/ks/release.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/ks/release.jks"
+            echo "storePassword=$KS_PASS"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASS"
+          } > "$RUNNER_TEMP/ks/keystore.properties"
+          echo "YAAD_KEYSTORE_PROPERTIES=$RUNNER_TEMP/ks/keystore.properties" >> "$GITHUB_ENV"
+
+      - name: Build signed App Bundle and Bazaar .bin
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon bundleRelease
+
+      - name: Remove keystore
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ks"
+
+      - name: Name outputs
+        run: |
+          V="${TAG#v}"; D=android/app/build/outputs/bundle/release
+          mkdir -p out
+          cp "$D/app-release.aab" "out/$APP-$V.aab"
+          cp "$D/app-release.bin" "out/$APP-$V.bin"
+          ls -la out
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: |
+            out/*.aab
+            out/*.bin
+
+      - name: Send to Cafe Bazaar
+        if: env.BAZAAR_API_SECRET != '' && (github.event_name == 'release' || inputs.publish)
+        env:
+          BAZAAR_DEVELOPER_NOTE: ${{ env.APP }} ${{ env.TAG }}
+        run: node tools/bazaar-publish.mjs out/*.aab out/*.bin

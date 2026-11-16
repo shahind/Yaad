@@ -71,16 +71,31 @@ try {
 }
 
 // Cafe Bazaar: every signed bundleRelease also writes app-release.bin (the signed digest
-// Bazaar asks for) next to app-release.aab, using tools/bazaar/bundlesigner. Set
-// bundleSigner=<path to jar> in the keystore properties to use a different jar.
+// Bazaar asks for) next to app-release.aab, using Bazaar's bundlesigner. The jar is fetched
+// once from github.com/cafebazaar/bundle-signer into tools/bazaar/ (git-ignored) and checked
+// against its SHA-256. Set bundleSigner=<path to jar> in the keystore properties to override.
+def bundleSignerVersion = '0.1.14'
+def bundleSignerSha256 = 'aef2c387f678558e3a4baddab9730fbdca64ef28a0e2e0245491e1088b4968f5'
 tasks.register('bazaarBin', Exec) {
     def ks = project.ext.releaseKs
     def aab = file("$buildDir/outputs/bundle/release/app-release.aab")
-    def jar = file(ks['bundleSigner'] ?: "$rootDir/../tools/bazaar/bundlesigner-0.1.14.jar")
+    def jar = file(ks['bundleSigner'] ?: "$rootDir/../tools/bazaar/bundlesigner-${bundleSignerVersion}.jar")
     onlyIf {
-        def ok = ks['storeFile'] && jar.exists() && aab.exists()
-        if (!ok) logger.warn("bazaarBin skipped: needs the release keystore, ${jar} and ${aab.name}")
+        def ok = ks['storeFile'] && aab.exists()
+        if (!ok) logger.warn("bazaarBin skipped: needs the release keystore and ${aab.name}")
         ok
+    }
+    doFirst {
+        if (!jar.exists()) {
+            jar.parentFile.mkdirs()
+            def url = "https://github.com/cafebazaar/bundle-signer/releases/download/v${bundleSignerVersion}/bundlesigner-${bundleSignerVersion}.jar"
+            logger.lifecycle("Downloading ${url}")
+            def tmp = file("${jar}.part")
+            new URL(url).withInputStream { i -> tmp.withOutputStream { it << i } }
+            def sha = java.security.MessageDigest.getInstance('SHA-256').digest(tmp.bytes).encodeHex().toString()
+            if (!ks['bundleSigner'] && sha != bundleSignerSha256) { tmp.delete(); throw new GradleException("bundlesigner checksum mismatch: ${sha}") }
+            tmp.renameTo(jar)
+        }
     }
     commandLine "${System.getProperty('java.home')}/bin/java", '-jar', jar,
         'genbin', '-v', '--bundle', aab, '--bin', aab.parentFile,

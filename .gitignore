@@ -5,3 +5,6 @@ www/data/
 *.log
 .DS_Store
 Thumbs.db
+
+# Cafe Bazaar bundlesigner (downloaded by the Gradle bazaarBin task)
+tools/bazaar/
