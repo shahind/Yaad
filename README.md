@@ -1,14 +1,16 @@
 <div align="center">
   <img src="www/icons/icon-192.png" width="96" alt="Yaad logo" />
   <h1>یاد · Yaad</h1>
-  <p><b>لغت‌نامهٔ آفلاین دهخدا</b><br/>
+  <p><b>لغت‌نامهٔ آفلاین دهخدا</b></p>
   <p><a href="https://shahind.github.io/Yaad/"><b>نسخه تحت وب</b></a></p>
 
-[![Windows](https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white)](https://github.com/shahind/Yaad/releases)
-[![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black)](https://github.com/shahind/Yaad/releases)
-[![iOS](https://img.shields.io/badge/iOS-000000?logo=apple&logoColor=white)](https://github.com/shahind/Yaad/releases)
-[![Google Play](https://img.shields.io/badge/Google_Play-414141?logo=googleplay&logoColor=white)](https://github.com/shahind/Yaad/releases)
-[![Bazaar](https://img.shields.io/badge/Bazaar-2BAE66?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCc+PHBhdGggZD0nTTQuNSA4aDE1bC0xLjIgMTIuNUg1Ljd6JyBmaWxsPSd3aGl0ZScvPjxwYXRoIGQ9J004LjUgOFY2LjhhMy41IDMuNSAwIDAgMSA3IDBWOCcgZmlsbD0nbm9uZScgc3Ryb2tlPSd3aGl0ZScgc3Ryb2tlLXdpZHRoPScyJy8+PC9zdmc+&logoColor=white)](https://cafebazaar.ir/app/com.shahinsoft.yaad)
+  <p>
+  <a href="https://github.com/shahind/Yaad/releases"><img alt="Windows" src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white&style=for-the-badge" height="40"></a>
+  <a href="https://github.com/shahind/Yaad/releases"><img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black&style=for-the-badge" height="40"></a>
+  <a href="https://github.com/shahind/Yaad/releases"><img alt="iOS" src="https://img.shields.io/badge/iOS-000000?logo=apple&logoColor=white&style=for-the-badge" height="40"></a>
+  <a href="https://github.com/shahind/Yaad/releases"><img alt="Google Play" src="https://img.shields.io/badge/Google_Play-414141?logo=googleplay&logoColor=white&style=for-the-badge" height="40"></a>
+  <a href="https://cafebazaar.ir/app/com.shahinsoft.yaad"><img alt="Bazaar" src="https://img.shields.io/badge/Bazaar-2BAE66?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCc+PHBhdGggZD0nTTQuNSA4aDE1bC0xLjIgMTIuNUg1Ljd6JyBmaWxsPSd3aGl0ZScvPjxwYXRoIGQ9J004LjUgOFY2LjhhMy41IDMuNSAwIDAgMSA3IDBWOCcgZmlsbD0nbm9uZScgc3Ryb2tlPSd3aGl0ZScgc3Ryb2tlLXdpZHRoPScyJy8+PC9zdmc+&logoColor=white&style=for-the-badge" height="40"></a>
+  </p>
 </div>
 
 ---
