@@ -1,4 +1,4 @@
-package io.github.shahind.yaad;
+package com.shahinsoft.yaad;
 
 import com.getcapacitor.BridgeActivity;
 

@@ -50,6 +50,11 @@ function toast(msg) {
 }
 
 const mobile = () => matchMedia('(max-width: 860px)').matches;
+// Web version only: where to get the Android app.
+const bazaarLink = () =>
+  isNative || isElectron
+    ? ''
+    : `<br/><a class="store-link" href="https://cafebazaar.ir/app/com.shahinsoft.yaad" target="_blank" rel="noopener">دریافت نسخهٔ اندروید از کافه‌بازار</a>`;
 const entryHref = (id, extra = '') => `#/e/${id}${extra}`;
 
 // ------------------------------------------------------------------ theme & settings
@@ -329,7 +334,7 @@ async function renderHome() {
     store.clearHistory();
     renderHome();
   });
-  if (stats) $('#stats').innerHTML = `${fa(stats.entries)} مدخل · ${fa(stats.phrases)} ترکیب<br/>کاملاً آفلاین`;
+  if (stats) $('#stats').innerHTML = `${fa(stats.entries)} مدخل · ${fa(stats.phrases)} ترکیب<br/>کاملاً آفلاین${bazaarLink()}`;
   if (randomWord == null) loadRandom();
   else showRandom();
 }
@@ -668,7 +673,7 @@ function openSettings() {
      <div class="about">
        <b>یاد</b> — لغت‌نامهٔ دهخدا، سریع، سبک و بی‌نیاز از اینترنت.<br/>
        ${stats ? `${fa(stats.entries)} مدخل و ${fa(stats.phrases)} ترکیب.` : ''}<br/>
-       کلید «/» برای جستجو · دوبار کلیک روی هر واژه در متن معنی برای جستجوی آن.
+       کلید «/» برای جستجو · دوبار کلیک روی هر واژه در متن معنی برای جستجوی آن.${bazaarLink()}
      </div>
      <div class="sheet-row"><button class="btn ghost" id="sheet-done" style="flex:1">بستن</button></div>`,
     (sh) => {

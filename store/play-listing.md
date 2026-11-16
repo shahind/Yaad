@@ -1,6 +1,6 @@
 # Google Play listing — Yaad (یاد)
 
-Package: `io.github.shahind.yaad` · Version **1.1.0** (versionCode 4)
+Package: `com.shahinsoft.yaad` · Version **1.1.1** (versionCode 5)
 
 ## Files to upload
 

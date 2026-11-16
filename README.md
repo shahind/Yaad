@@ -3,6 +3,12 @@
   <h1>یاد · Yaad</h1>
   <p><b>لغت‌نامهٔ آفلاین دهخدا</b><br/>
   <p><a href="https://shahind.github.io/Yaad/"><b>نسخه تحت وب</b></a></p>
+
+[![Windows](https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white)](https://github.com/shahind/Yaad/releases)
+[![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black)](https://github.com/shahind/Yaad/releases)
+[![iOS](https://img.shields.io/badge/iOS-000000?logo=apple&logoColor=white)](https://github.com/shahind/Yaad/releases)
+[![Google Play](https://img.shields.io/badge/Google_Play-414141?logo=googleplay&logoColor=white)](https://github.com/shahind/Yaad/releases)
+[![Bazaar](https://img.shields.io/badge/Bazaar-2BAE66?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCc+PHBhdGggZD0nTTQuNSA4aDE1bC0xLjIgMTIuNUg1Ljd6JyBmaWxsPSd3aGl0ZScvPjxwYXRoIGQ9J004LjUgOFY2LjhhMy41IDMuNSAwIDAgMSA3IDBWOCcgZmlsbD0nbm9uZScgc3Ryb2tlPSd3aGl0ZScgc3Ryb2tlLXdpZHRoPScyJy8+PC9zdmc+&logoColor=white)](https://cafebazaar.ir/app/com.shahinsoft.yaad)
 </div>
 
 ---
@@ -12,11 +18,12 @@
 | Platform | Link |
 |---|---|
 | 🌐 Web | **[shahind.github.io/Yaad](https://shahind.github.io/Yaad/)** — installable as a PWA; Settings → «بارگیری همهٔ داده‌ها» makes it fully offline |
-| 🤖 Android | **[Yaad-1.1.0.apk](https://github.com/shahind/Yaad/releases/download/v1.1.0/Yaad-1.1.0.apk)** (Android 7+) |
-| 🍏 iOS | **[Yaad-1.1.0-ios-unsigned.ipa](https://github.com/shahind/Yaad/releases/download/v1.1.0/Yaad-1.1.0-ios-unsigned.ipa)** — unsigned; sign with AltStore / Sideloadly |
-| 🪟 Windows | **[Yaad V1.1.0 x64](https://github.com/shahind/Yaad/releases/download/v1.1.0/Yaad-Setup-1.1.0.exe)** — silent install: `Yaad-Setup-1.1.0.exe /S` |
-| 🪟 Windows - portable | **[Yaad V1.1.0 x64 Portable](https://github.com/shahind/Yaad/releases/download/v1.1.0/Yaad-Portable-1.1.0.exe)** |
-| 🐧 Linux | **[AppImage](https://github.com/shahind/Yaad/releases/download/v1.1.0/Yaad-1.1.0.AppImage)** · **[.deb](https://github.com/shahind/Yaad/releases/download/v1.1.0/yaad_1.1.0_amd64.deb)** |
+| 🛍️ Bazaar | **[cafebazaar.ir/app/com.shahinsoft.yaad](https://cafebazaar.ir/app/com.shahinsoft.yaad)** |
+| 🤖 Android | **[Yaad-1.1.1.apk](https://github.com/shahind/Yaad/releases/download/v1.1.1/Yaad-1.1.1.apk)** (Android 7+) |
+| 🍏 iOS | **[Yaad-1.1.1-ios-unsigned.ipa](https://github.com/shahind/Yaad/releases/download/v1.1.1/Yaad-1.1.1-ios-unsigned.ipa)** — unsigned; sign with AltStore / Sideloadly |
+| 🪟 Windows | **[Yaad V1.1.1 x64](https://github.com/shahind/Yaad/releases/download/v1.1.1/Yaad-Setup-1.1.1.exe)** — silent install: `Yaad-Setup-1.1.1.exe /S` |
+| 🪟 Windows - portable | **[Yaad V1.1.1 x64 Portable](https://github.com/shahind/Yaad/releases/download/v1.1.1/Yaad-Portable-1.1.1.exe)** |
+| 🐧 Linux | **[AppImage](https://github.com/shahind/Yaad/releases/download/v1.1.1/Yaad-1.1.1.AppImage)** · **[.deb](https://github.com/shahind/Yaad/releases/download/v1.1.1/yaad_1.1.1_amd64.deb)** |
 
 All versions are available at [Releases Page](https://github.com/shahind/Yaad/releases).
 
