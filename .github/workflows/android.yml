@@ -1,0 +1,108 @@
+name: Android release (Cafe Bazaar)
+
+# On a published release: builds the signed Android App Bundle and generates the
+# Cafe Bazaar .bin (signed digest of the bundle) with tools/bazaar/bundlesigner, then
+# attaches both to the release. Upload the .aab and the .bin from the same release
+# together — the .bin only matches the bundle it was generated from.
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   ANDROID_KEYSTORE_BASE64   base64 of the release .jks
+#   ANDROID_KEYSTORE_PASSWORD keystore password
+#   ANDROID_KEY_ALIAS         key alias
+#   ANDROID_KEY_PASSWORD      key password
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build and attach to (e.g. v1.1.1)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build dictionary data
+        run: npm run build:data
+
+      - name: Search smoke test
+        run: npm test
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+
+      - name: Keystore
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ks"
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/ks/release.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/ks/release.jks"
+            echo "storePassword=$KS_PASS"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASS"
+          } > "$RUNNER_TEMP/ks/keystore.properties"
+          echo "YAAD_KEYSTORE_PROPERTIES=$RUNNER_TEMP/ks/keystore.properties" >> "$GITHUB_ENV"
+
+      - name: Build signed App Bundle
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon bundleRelease
+
+      - name: Generate Cafe Bazaar bin
+        env:
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          VERSION="${TAG#v}"
+          mkdir -p out
+          cp android/app/build/outputs/bundle/release/app-release.aab "out/Yaad-${VERSION}.aab"
+          java -jar tools/bazaar/bundlesigner-0.1.14.jar genbin -v \
+            --bundle "out/Yaad-${VERSION}.aab" --bin out \
+            --v2-signing-enabled true --v3-signing-enabled false \
+            --ks "$RUNNER_TEMP/ks/release.jks" --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KS_PASS --key-pass env:KEY_PASS
+          ls -la out
+
+      - name: Remove keystore
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ks"
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: |
+            out/*.aab
+            out/*.bin
