@@ -147,6 +147,6 @@ manually from the Actions tab with a tag).
 
 ## Credits & license
 
-- Dictionary content: *Loghatnameh-ye Dehkhoda* (لغت‌نامهٔ دهخدا).
+- Dictionary content: *Loghatnameh-ye Dehkhoda* (لغت‌نامهٔ دهخدا), SQL format by [Nimah79](https://github.com/nimah79/Dehkhoda-SQL.git)
 - Font: [Vazirmatn](https://github.com/rastikerdar/vazirmatn) by Saber Rastikerdar — SIL Open Font License (`www/fonts/OFL.txt`).
 - Code: GNU GPL v3 — see [LICENSE](LICENSE).
