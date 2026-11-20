@@ -35,9 +35,14 @@
         <div class="searchbar">
           <label class="search-field">
             <svg class="search-icon"><use href="#i-search" /></svg>
-            <input id="q" type="search" inputmode="search" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search" placeholder="جستجو در دهخدا…" aria-label="جستجو" />
+            <input id="q" type="search" inputmode="search" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search" placeholder="واژه، «عبارت دقیق» یا /الگو/…" aria-label="جستجو" aria-describedby="status" />
             <button class="clear-btn" id="btn-clear" aria-label="پاک کردن" hidden><svg><use href="#i-x" /></svg></button>
           </label>
+          <button class="search-help-btn" id="btn-search-help" aria-haspopup="dialog"><svg><use href="#i-settings" /></svg>جستجوی پیشرفته</button>
+          <div class="search-filter-bar" id="search-filter-bar" hidden>
+            <button class="link-btn" id="btn-search-filters" aria-haspopup="dialog"></button>
+            <button class="link-btn" id="btn-clear-filters">پاک کردن برچسب‌ها</button>
+          </div>
           <div class="search-status" id="status" aria-live="polite"></div>
         </div>
         <div class="side-body" id="side-body">

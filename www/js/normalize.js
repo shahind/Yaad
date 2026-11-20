@@ -72,6 +72,47 @@ export function normalizeCompact(s) {
   return normalizeSpaced(s).replace(/ /g, '');
 }
 
+// Quoted phrases fold the same letters/diacritics as ordinary search, but retain
+// punctuation and every explicit space, including spaces at either end.
+function quotedCode(c, keepNewlines = false) {
+  if (c === 0x200c || T[c] === 0) return 0; // ZWNJ joins, as in meaning tokens
+  if (keepNewlines && c === 10) return 10;
+  if ((c >= 9 && c <= 13) || c === 0xa0) return 32;
+  return T[c] === 32 ? c : T[c];
+}
+
+export function normalizeQuoted(s, keepNewlines = false) {
+  let out = '';
+  let buf = [];
+  for (let i = 0; i < s.length; i++) {
+    const c = quotedCode(s.charCodeAt(i), keepNewlines);
+    if (c) buf.push(c);
+    if (buf.length >= 8192) {
+      out += String.fromCharCode.apply(null, buf);
+      buf = [];
+    }
+  }
+  return out + String.fromCharCode.apply(null, buf);
+}
+
+// `phrase` is already normalized. Map a literal match back to displayed offsets
+// so folded letters, deleted diacritics and ZWNJ do not misplace highlights.
+export function quotedMatch(text, phrase) {
+  if (!phrase) return null;
+  const at = normalizeQuoted(text).indexOf(phrase);
+  if (at < 0) return null;
+  let start = 0;
+  let end = 0;
+  for (let i = 0, pos = 0; i < text.length; i++) {
+    if (!quotedCode(text.charCodeAt(i))) continue;
+    if (pos === at) start = i;
+    if (pos === at + phrase.length - 1) { end = i + 1; break; }
+    pos++;
+  }
+  while (end < text.length && !quotedCode(text.charCodeAt(end))) end++;
+  return { start, end };
+}
+
 /** Split text into normalized search tokens (ZWNJ joins, other separators split). */
 export function tokenize(s) {
   // ZWNJ inside a word joins the parts ("می‌رود" -> "میرود"); everything else separates.
@@ -81,10 +122,11 @@ export function tokenize(s) {
 /**
  * Returns a word tester for query terms: 2 = exact token match, 1 = prefix match
  * (terms of 3+ letters, mirroring meaning search), 0 = no match.
+ * Pass exact=true for whole-token highlighting, including older saved lookup links.
  */
-export function termTester(terms) {
+export function termTester(terms, exact = false) {
   const set = new Set(terms);
-  const prefixes = terms.filter((t) => t.length >= 3);
+  const prefixes = exact ? [] : terms.filter((t) => t.length >= 3);
   return (word) => {
     const t = normalizeCompact(word.replace(/\u200c/g, ''));
     if (!t) return 0;
