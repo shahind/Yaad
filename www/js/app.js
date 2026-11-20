@@ -1,7 +1,12 @@
 import * as store from './store.js';
-import { renderMeaning, meaningText, markTerms, highlightWord, esc } from './render.js';
+import { renderMeaning, meaningText, markTerms, markMatch, markLiteral, highlightWord, esc } from './render.js';
 import { copyText, shareText, isNative, isElectron, plugin } from './platform.js';
-import { normalizeCompact } from './normalize.js';
+import { normalizeCompact, normalizeQuoted, quotedMatch, termTester } from './normalize.js';
+import { parseSearchQuery, buildWordQuery, readSearchBuilder, SEARCH_FILTER_TAGS, SEARCH_SCOPES, hasTagFilters, separateSearchFilters } from './search-syntax.js';
+import { ENTRY_TAGS, compatibleTagIndex } from './search-origin-grammar.js';
+import { SENSE_TAGS, compatibleSenseIndex, readOpeningTags, splitSenses } from './search-subject-usage.js';
+import { plainMeaning } from './search-match-text.js';
+import { SOURCE_VERSION, SOURCE_TAGS, sourceOwners } from './search-citations.js';
 
 // ------------------------------------------------------------------ worker RPC
 
@@ -9,16 +14,20 @@ const worker = new Worker(new URL('./search.worker.js', import.meta.url), { type
 let rpcSeq = 0;
 const pending = new Map();
 worker.onmessage = (e) => {
-  const { id, result, error } = e.data;
+  const { id, result, error, progress } = e.data;
   const p = pending.get(id);
   if (!p) return;
+  if (progress) {
+    p.onProgress?.(progress);
+    return;
+  }
   pending.delete(id);
   error ? p.reject(new Error(error)) : p.resolve(result);
 };
-const call = (type, payload) =>
+const call = (type, payload, onProgress) =>
   new Promise((resolve, reject) => {
     const id = ++rpcSeq;
-    pending.set(id, { resolve, reject });
+    pending.set(id, { resolve, reject, onProgress });
     worker.postMessage({ id, type, payload });
   });
 
@@ -91,7 +100,8 @@ $('#btn-theme').addEventListener('click', () => {
 const PAGE = 40;
 const HEAD_LIMIT = 400; // mirrors the worker cap
 const headCount = (head) => (head.length >= HEAD_LIMIT ? `+${fa(HEAD_LIMIT)}` : fa(head.length));
-const search = { q: '', head: [], meaning: [], terms: [], meaningTotal: 0, seq: 0, shownHead: 0, shownMeaning: 0, meaningPending: false };
+const search = { q: '', text: '', mode: 'text', filters: {}, tagMatch: {}, head: [], meaning: [], terms: [], meaningTotal: 0, meaningLimited: false, seq: 0, shownHead: 0, shownMeaning: 0, meaningPending: false, meaningError: '', meaningNotice: '' };
+const meaningCount = () => `${search.meaningLimited ? '+' : ''}${fa(search.meaningTotal)}`;
 let meaningTimer;
 
 el.q.addEventListener('input', () => runSearch(el.q.value));
@@ -102,55 +112,135 @@ el.clear.addEventListener('click', () => {
 });
 
 async function runSearch(q) {
+  try {
+    const legacy = separateSearchFilters(q);
+    if (hasTagFilters(legacy.filters)) {
+      search.filters = legacy.filters;
+      search.tagMatch = {};
+      q = legacy.q;
+      el.q.value = q;
+    }
+  } catch { /* Query validation below reports incomplete input. */ }
   const seq = ++search.seq;
+  const filters = { ...search.filters };
+  const tagMatch = { ...search.tagMatch };
+  const filterCount = SEARCH_FILTER_TAGS.filter((tag) => filters[tag.key] === 1 || filters[tag.key] === -1).length;
+  $('#search-filter-bar').hidden = !filterCount;
+  $('#btn-search-filters').textContent = `برچسب‌های فعال (${fa(filterCount)})`;
   search.q = q;
   el.clear.hidden = !q;
+  el.q.removeAttribute('aria-invalid');
   clearTimeout(meaningTimer);
-  if (!normalizeCompact(q)) {
-    search.head = [];
-    search.meaning = [];
-    el.results.innerHTML = '';
+  search.head = [];
+  search.meaning = [];
+  search.terms = [];
+  search.meaningTotal = 0;
+  search.meaningLimited = false;
+  search.meaningError = '';
+  search.meaningNotice = '';
+  el.results.innerHTML = '';
+  let query;
+  try {
+    query = parseSearchQuery(q);
+  } catch (error) {
+    call('cancelSearch').catch(() => {});
+    showSearchError(error);
+    return;
+  }
+  search.mode = query.mode;
+  search.text = query.text || '';
+  el.q.dir = query.mode === 'regex' || query.mode === 'scoped' ? 'ltr' : 'rtl';
+  if (!filterCount && ((query.mode === 'text' && !normalizeCompact(query.text)) || (query.mode === 'exact' && !normalizeQuoted(query.text)))) {
+    call('cancelSearch').catch(() => {});
     el.status.textContent = '';
     el.home.hidden = false;
     renderHome();
     return;
   }
   el.home.hidden = true;
-  const { head, ms } = await call('search', { q });
+  el.status.textContent = 'در حال جستجو…';
+  const hasMeanings = query.mode !== 'scoped' || query.hasMeanings;
+  if (query.mode === 'scoped' && hasMeanings) {
+    call('cancelSearch').catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    if (seq !== search.seq) return;
+  }
+  let response;
+  try {
+    response = await call('search', { q, filters, tagMatch }, query.mode === 'scoped' ? (progress) => {
+      if (seq === search.seq) el.status.textContent = `جستجو در معنی‌ها: ${fa(progress.scanned)} از ${fa(progress.total)} بخش`;
+    } : undefined);
+  } catch (error) {
+    if (seq === search.seq) showSearchError(error);
+    return;
+  }
   if (seq !== search.seq) return;
+  const { head, ms } = response;
   search.head = head;
-  search.meaning = [];
-  search.terms = [];
-  search.meaningPending = true;
+  search.meaningPending = hasMeanings;
   search.shownHead = 0;
   search.shownMeaning = 0;
   renderResults();
-  el.status.textContent = `${headCount(head)} واژه · ${fa(Math.max(1, Math.round(ms)))} میلی‌ثانیه`;
-  // Meaning search fetches index shards; give fast typists a moment.
+  el.status.textContent = `${headCount(head)} واژه · ${fa(Math.max(1, Math.round(ms)))} میلی‌ثانیه${hasMeanings && query.mode !== 'text' ? ' · جستجو در معنی‌ها…' : ''}`;
+  if (!hasMeanings) return;
+  // Meaning search loads shards or definition blocks; give fast typists a moment.
   meaningTimer = setTimeout(async () => {
-    const exclude = head.filter((h) => !h.phrase && h.tier <= 1).map((h) => h.id);
-    const r = await call('meanings', { q, exclude });
-    if (seq !== search.seq) return;
-    search.meaning = r.results;
-    search.terms = r.terms;
-    search.meaningTotal = r.total || 0;
-    search.meaningPending = false;
-    renderMeaningSection();
-    el.status.textContent = `${headCount(head)} واژه · ${fa(r.total || 0)} در متن معنی‌ها`;
-  }, head.length ? 180 : 60);
+    try {
+      const exclude = head.filter((h) => !h.phrase && h.tier <= 1).map((h) => h.id);
+      const r = await call('meanings', { q, filters, tagMatch, exclude, progress: query.mode !== 'text' }, (progress) => {
+        if (seq !== search.seq) return;
+        search.meaning.push(...progress.results);
+        search.meaningTotal = progress.matched;
+        if (search.meaning.length) {
+          search.meaningPending = false;
+          renderMeaningSection();
+        }
+        el.status.textContent = progress.stage === 'index'
+          ? `${headCount(head)} واژه · جستجو در معنی‌ها: ${fa(progress.scanned)} از ${fa(progress.total)} بخش · ${fa(progress.matched)} نتیجه`
+          : `${headCount(head)} واژه · بررسی عبارت: ${fa(progress.scanned)} از ${fa(progress.total)} مدخل · ${fa(progress.matched)} نتیجه`;
+      });
+      if (seq !== search.seq) return;
+      search.meaning = r.results;
+      search.terms = r.terms;
+      search.meaningTotal = r.total || 0;
+      search.meaningLimited = !!r.limited;
+      search.meaningNotice = r.unindexed ? 'این عبارت واژهٔ قابل جستجو در معنی‌ها ندارد.'
+        : r.unsupported ? 'این الگو در معنی‌ها اجرا نمی‌شود؛ آن را ساده‌تر کنید.'
+          : r.candidateLimited ? 'عبارت فقط در هزار نتیجهٔ برتر بررسی می‌شود.' : '';
+      search.meaningPending = false;
+      renderMeaningSection();
+      el.status.textContent = `${headCount(head)} واژه · ${meaningCount()} در معنی‌ها${query.mode === 'exact' ? ' · جستجوی عبارتی' : ''}`;
+    } catch (error) {
+      if (seq !== search.seq) return;
+      search.meaningPending = false;
+      search.meaningError = query.mode !== 'text'
+        ? 'جستجوی معنی‌ها کامل نشد؛ نتیجه‌ها ممکن است ناقص باشند.'
+        : 'جستجوی معنی‌ها ناموفق بود؛ دوباره تلاش کنید.';
+      renderMeaningSection();
+      el.status.textContent = search.meaningError;
+    }
+  }, query.mode === 'regex' ? 350 : head.length ? 180 : 60);
+}
+
+function showSearchError(error) {
+  el.home.hidden = true;
+  el.q.setAttribute('aria-invalid', 'true');
+  el.status.textContent = error.message;
+  el.results.innerHTML = `<div class="empty">${esc(error.message)}</div>`;
 }
 
 function itemHTML(r, kind) {
-  const href = r.phrase
+  const terms = r.terms || search.terms;
+  const href = r.range ? entryHref(r.id, `?s=${r.range.join(',')}${search.mode === 'exact' ? `&q=${encodeURIComponent(search.text)}` : terms.length ? `&t=${encodeURIComponent(terms.join(' '))}${r.terms ? '&exact=1' : ''}` : ''}`) : r.phrase
     ? entryHref(r.id, `?p=${encodeURIComponent(r.w)}`)
     : kind === 'm'
-      ? entryHref(r.id, `?t=${encodeURIComponent(search.terms.join(' '))}`)
+      ? entryHref(r.id, r.match ? `?r=${r.match.start},${r.match.end}` : search.mode === 'exact' ? `?q=${encodeURIComponent(search.text)}` : `?t=${encodeURIComponent(terms.join(' '))}${r.terms ? '&exact=1' : ''}`)
       : entryHref(r.id);
-  const word = kind === 'h' ? highlightWord(r.w, search.q) : esc(r.w);
+  const word = kind === 'h' ? highlightWord(r.w, search.text, r.match) : esc(r.w);
   const extra = r.phrase ? `<span class="tag">ترکیب</span><span class="item-parent">در «${esc(r.parent)}»</span>` : '';
-  return `<a class="item" href="${href}" data-id="${r.id}" data-kind="${kind}" data-p="${r.phrase ? 1 : 0}">
-    <div class="item-head"><span class="item-word">${word}</span><span class="item-pron"></span>${extra}</div>
-    <div class="item-snippet"></div></a>`;
+  return `<a class="item" href="${href}" data-id="${r.id}" data-kind="${kind}" data-p="${r.phrase ? 1 : 0}"${r.terms ? ` data-t="${esc(r.terms.join(' '))}"` : ''}${r.range ? ` data-s="${r.range.join(',')}"` : ''}${r.snippet ? ' data-obs="1"' : ''}>
+    <div class="item-head"><span class="item-word">${word}</span><span class="item-pron">${r.snippet ? esc(r.snippet.pron) : ''}</span>${extra}</div>
+    <div class="item-snippet">${r.snippet ? markMatch(r.snippet.text, r.snippet.match) : ''}</div></a>`;
 }
 
 function renderResults() {
@@ -174,13 +264,35 @@ function renderMeaningSection() {
     sec.innerHTML = search.head.length ? '' : `<div class="empty">در حال جستجو…</div>`;
     return;
   }
+  if (search.meaningError && !search.meaning.length) {
+    sec.innerHTML = `<div class="empty">${esc(search.meaningError)}</div>`;
+    return;
+  }
+  if (search.meaningNotice && !search.meaning.length) {
+    sec.innerHTML = `<div class="empty">${esc(search.meaningNotice)}</div>`;
+    return;
+  }
   if (!search.meaning.length) {
     sec.innerHTML = search.head.length
       ? ''
       : `<div class="empty">${icon('search')}<br/>چیزی یافت نشد.<br/><small>املای دیگری را بیازمایید.</small></div>`;
     return;
   }
-  sec.innerHTML = `<div class="section-title"><span>در متن معنی‌ها</span><span class="count">${fa(search.meaningTotal)}</span></div><div class="card" id="meaning-list"></div>`;
+  const list = $('#meaning-list', sec);
+  if (list) {
+    $('.count', sec).textContent = meaningCount();
+    const more = $('.more', list);
+    if (more) more.textContent = `نمایش بیشتر (${fa(search.meaning.length - search.shownMeaning)})`;
+    else if (search.shownMeaning < search.meaning.length) appendItems('m');
+    if (search.meaningError && !$('.meaning-search-error', sec)) {
+      sec.insertAdjacentHTML('afterbegin', `<div class="empty meaning-search-error">${esc(search.meaningError)}</div>`);
+    }
+    if (search.meaningNotice && !$('.meaning-search-notice', sec)) {
+      sec.insertAdjacentHTML('afterbegin', `<div class="empty meaning-search-notice">${esc(search.meaningNotice)}</div>`);
+    }
+    return;
+  }
+  sec.innerHTML = `${search.meaningNotice ? `<div class="empty meaning-search-notice">${esc(search.meaningNotice)}</div>` : ''}<div class="section-title"><span>در معنی‌ها</span><span class="count">${meaningCount()}</span></div><div class="card" id="meaning-list"></div>`;
   search.shownMeaning = 0;
   appendItems('m');
 }
@@ -244,26 +356,37 @@ async function flushSnippets() {
   snippetScheduled = false;
   const items = snippetQueue.splice(0);
   const groups = { plain: [], terms: [] };
-  for (const it of items) (it.dataset.kind === 'm' ? groups.terms : groups.plain).push(it);
-  const fill = async (its, terms) => {
+  for (const it of items) {
+    if (it.isConnected) (it.dataset.kind === 'm' ? groups.terms : groups.plain).push(it);
+  }
+  const fill = async (its, terms, exact = false, literal = '') => {
     if (!its.length) return;
-    const key = (id) => `${id}|${terms.join(' ')}`;
-    const need = [...new Set(its.map((it) => +it.dataset.id).filter((id) => !snippetCache.has(key(id))))];
+    const request = (it) => {
+      const words = it.dataset.t ? it.dataset.t.split(' ') : terms;
+      const range = it.dataset.s ? it.dataset.s.split(',').map(Number) : undefined;
+      const key = `${it.dataset.id}|${exact ? 'exact' : 'text'}|${words.join(' ')}|${literal}|${it.dataset.s || ''}`;
+      return { key, id: +it.dataset.id, terms: words, range };
+    };
+    const need = [...new Map(its.map(request).filter((row) => !snippetCache.has(row.key)).map((row) => [row.key, row])).values()];
     if (need.length) {
-      const res = await call('snippets', { ids: need, terms });
-      for (const r of res) snippetCache.set(key(r.id), r);
+      const res = await call('snippets', { requests: need, exact, literal });
+      for (const r of res) snippetCache.set(r.key, r);
       if (snippetCache.size > 3000) snippetCache.clear();
     }
     for (const it of its) {
-      const s = snippetCache.get(key(+it.dataset.id));
+      const row = request(it);
+      const s = snippetCache.get(row.key);
       if (!s) continue;
       const sn = it.querySelector('.item-snippet');
-      sn.textContent = s.text;
-      if (terms.length) markTerms(sn, terms);
+      if (s.match) sn.innerHTML = markMatch(s.text, s.match);
+      else {
+        sn.textContent = s.text;
+        if (row.terms.length) markTerms(sn, row.terms, exact);
+      }
       if (s.pron && it.dataset.p !== '1') it.querySelector('.item-pron').textContent = s.pron;
     }
   };
-  await Promise.all([fill(groups.plain, []), fill(groups.terms, search.terms)]);
+  await Promise.all([fill(groups.plain, []), fill(groups.terms, search.terms, search.mode === 'regex' || search.mode === 'scoped', search.mode === 'exact' ? search.text : '')]);
 }
 
 // Keyboard navigation in results.
@@ -295,6 +418,7 @@ el.results.addEventListener('keydown', (e) => {
   }
 });
 document.addEventListener('keydown', (e) => {
+  if (!el.sheet.hidden) return;
   if (e.key === '/' && document.activeElement !== el.q && !e.target.closest('input,textarea')) {
     e.preventDefault();
     el.q.focus();
@@ -367,6 +491,14 @@ async function showEntry(id, params) {
   store.addHistory(e);
   const fav = store.isFav(e.id);
   const inLists = store.listsWith(e.id).filter((l) => l !== store.FAV).length;
+  const opening = readOpeningTags(e.body);
+  const senses = splitSenses(e.body);
+  const facets = new Set(senses.filter((sense) => sense.phrase === 0).flatMap((sense) => sense.facets));
+  const tags = [
+    ...ENTRY_TAGS.filter((tag) => opening.mask & tag.bit),
+    ...SENSE_TAGS.filter((tag) => !tag.aliasOf && facets.has(tag.id)),
+  ];
+  const cited = sourceOwners(e.body, senses).get(0) || new Set();
   el.view.innerHTML = `
     <article class="entry">
       <div class="entry-top">
@@ -378,7 +510,13 @@ async function showEntry(id, params) {
       </div>
       <header class="entry-head">
         <h1 class="entry-word">${esc(e.word)}</h1>
-        ${e.pron ? `<div class="entry-pron">${esc(e.pron)}</div>` : ''}
+        ${e.pron || tags.length ? `<div class="entry-labels">
+          ${e.pron ? `<div class="entry-pron">${esc(e.pron)}</div>` : ''}
+          ${tags.length ? `<div class="entry-tags">${tags.map((tag) => `<span class="entry-tag">${esc(tag.label)}</span>`).join('')}</div>` : ''}
+        </div>` : ''}
+        ${cited.size ? `<details class="entry-sources"><summary>یادکردها (${fa(cited.size)})</summary>
+          <div class="entry-tags">${SOURCE_TAGS.filter((source) => cited.has(source.id)).map((source) => `<span class="entry-tag">${esc(source.label)}</span>`).join('')}</div>
+        </details>` : ''}
         <div class="entry-actions">
           <button class="action ${fav ? 'on' : ''}" data-act="fav">${icon('star')}<span>برگزیده</span></button>
           <button class="action ${inLists ? 'on' : ''}" data-act="lists">${icon('list-plus')}<span>فهرست‌ها${inLists ? ` (${fa(inLists)})` : ''}</span></button>
@@ -395,7 +533,16 @@ async function showEntry(id, params) {
   el.view.scrollTop = 0;
   const meaning = $('#meaning');
   let focus = null;
-  if (params.get('p')) {
+  if (/^\d+,\d+$/.test(params.get('s') || '')) {
+    const [start, end] = params.get('s').split(',').map(Number);
+    const text = plainMeaning(e.body.slice(start, end));
+    const test = termTester((params.get('t') || '').split(' ').filter(Boolean), params.get('exact') === '1');
+    const literal = params.get('q') ? quotedMatch(text, normalizeQuoted(params.get('q'))) : null;
+    const found = literal ? null : [...text.matchAll(/[^\s.,;:!?()[\]«»"'،؛؟]+/g)].find((match) => test(match[0]));
+    const at = literal?.start ?? found?.index ?? 0;
+    const needle = literal ? text.slice(literal.start, literal.end) : found?.[0] || text.slice(0, 160);
+    focus = markLiteral(meaning, needle, plainMeaning(e.body.slice(0, start)) + text.slice(0, at))[0];
+  } else if (params.get('p')) {
     // Opened from a sub-entry phrase: scroll to it.
     const target = normalizeCompact(params.get('p'));
     focus = [...meaning.querySelectorAll('b.hl')].find((b) => normalizeCompact(b.textContent) === target);
@@ -405,8 +552,17 @@ async function showEntry(id, params) {
       mk.append(focus);
       focus = mk;
     }
+  } else if (/^\d+,\d+$/.test(params.get('r') || '')) {
+    const [start, end] = params.get('r').split(',').map(Number);
+    const text = plainMeaning(e.body);
+    const needle = text.slice(start, Math.min(end, start + 200));
+    focus = markLiteral(meaning, needle, text.slice(0, start))[0];
+  } else if (params.get('q')) {
+    const text = plainMeaning(e.body);
+    const match = quotedMatch(text, normalizeQuoted(params.get('q')));
+    if (match) focus = markLiteral(meaning, text.slice(match.start, match.end), text.slice(0, match.start))[0];
   } else if (params.get('t')) {
-    focus = markTerms(meaning, params.get('t').split(' ').filter(Boolean))[0];
+    focus = markTerms(meaning, params.get('t').split(' ').filter(Boolean), params.get('exact') === '1')[0];
   }
   if (focus) {
     focus.classList.add('focus');
@@ -544,16 +700,25 @@ function showList(lid) {
 
 // ------------------------------------------------------------------ sheets
 
+let sheetFocusReturn;
 function openSheet(html, onReady) {
+  if (el.sheet.hidden) sheetFocusReturn = document.activeElement;
+  el.sheet.classList.remove('search-sheet');
+  el.sheet.onkeydown = null;
+  el.sheet.removeAttribute('aria-labelledby');
   el.sheet.innerHTML = html;
   el.sheet.hidden = false;
   el.backdrop.hidden = false;
   onReady?.(el.sheet);
 }
 function closeSheet() {
+  const wasOpen = !el.sheet.hidden;
   el.sheet.hidden = true;
   el.backdrop.hidden = true;
   el.sheet.innerHTML = '';
+  el.sheet.classList.remove('search-sheet');
+  el.sheet.onkeydown = null;
+  if (wasOpen && sheetFocusReturn?.isConnected) sheetFocusReturn.focus({ preventScroll: true });
 }
 el.backdrop.addEventListener('click', closeSheet);
 document.addEventListener('keydown', (e) => e.key === 'Escape' && !el.sheet.hidden && closeSheet());
@@ -586,6 +751,430 @@ function confirmSheet(msg, onOk) {
     },
   );
 }
+
+const SEARCH_HELPERS = [
+  ['starts', 'آغاز شود با', 'یاد'],
+  ['ends', 'پایان یابد با', 'گار'],
+  ['contains', 'دربرگیرندهٔ نوشته', 'یاد'],
+  ['excludes', 'بدون این نوشته', 'یاد'],
+  ['not-starts', 'آغاز نشود با', 'نا'],
+  ['not-ends', 'پایان نیابد با', 'ها'],
+  ['exact', 'عبارت درون گیومه', 'یاد', 'فاصله‌های آغاز و پایان حفظ می‌شوند. برای عبارت چندواژه‌ای در معنی‌ها، آن را در نوار جستجو داخل گیومه بگذارید.'],
+  ['whole', 'برابری کامل', 'یاد', 'کل واژه یا ترکیب برابر باشد.'],
+  ['either', 'یکی از چند گزینه', 'یاد، خاطر', 'گزینه‌ها را با ویرگول جدا کنید.'],
+  ['wildcard', 'جای خالی در واژه', 'ک?اب', '? یک نویسه و * هر تعداد نویسه است؛ ک?اب: کتاب یا کباب؛ یاد*: یاد، یادگار، یاد رفتن و…'],
+  ['letters', 'فقط از این نویسه‌ها', 'ابدر', 'یک بار نوشتن هر نویسه کافی است؛ در نتیجه می‌تواند تکرار شود.'],
+  ['length', 'طول مشخص', '۴', '۱ تا ۱۰۰ نویسه؛ در واژه‌ها، فاصله، نیم‌فاصله و اعراب هم شمرده می‌شوند. در معنی‌ها، هر واژه بدون اعراب و نیم‌فاصله سنجیده می‌شود.'],
+  ['min-length', 'کمترین طول', '۳', 'کمترین تعداد نویسه؛ ۱ تا ۱۰۰.'],
+  ['max-length', 'بیشترین طول', '۷', 'بیشترین تعداد نویسه؛ ۱ تا ۱۰۰.'],
+  ['length-range', 'بازهٔ طول', '۳-۷', 'از کم به زیاد بنویسید؛ مانند ۳-۷.'],
+  ['regex', 'الگوی دلخواه (Regex)', '^یاد', 'الگو را بدون / بنویسید یا الگوی کنونی را ویرایش کنید.'],
+];
+
+const TAG_GROUPS = [
+  ['origin', 'ریشه'], ['kind', 'نوع واژه'], ['subject', 'موضوع'],
+  ['usage', 'کاربرد'], ['source', 'یادکرد'],
+];
+let tagCounts = {};
+let tagCountsRequest;
+
+function tagChoicesHTML(modes) {
+  return `<section class="tag-selection" aria-labelledby="tag-selection-title">
+    <div class="tag-selection-heading"><h4 id="tag-selection-title">برچسب‌های فعال <span id="tag-selection-count"></span></h4>
+      <button class="link-btn" type="button" id="tag-filter-reset">پاک کردن</button></div>
+    <div class="selected-filters" id="selected-filters"></div>
+    <p class="search-guide">✓ داشتن، × نداشتن؛ برای لغو، دوباره بزنید.</p>
+    <div class="tag-browser-toolbar"><label class="field-label" for="tag-filter-query">یافتن برچسب
+      <input class="text-input" id="tag-filter-query" type="search" placeholder="برچسب یا یادکرد…" autocomplete="off" spellcheck="false" />
+    </label>
+    <div class="tag-categories" role="group" aria-label="دسته‌های برچسب">
+      ${[['all', 'همه'], ...TAG_GROUPS].map(([group, label]) => `<button type="button" class="tag-category" data-tag-category="${group}" aria-pressed="${group === 'all'}">${label}<span data-category-count="${group}" hidden></span></button>`).join('')}
+    </div></div>
+    <p class="tag-count-note">شمار کل واژه‌ها و ترکیب‌ها؛ — یعنی نامشخص.</p>
+    <p class="search-guide" id="tag-filter-empty" role="status" hidden>برچسبی پیدا نشد.</p>
+    ${TAG_GROUPS.map(([group, label]) => `<fieldset class="tag-filter-group" data-tag-group="${group}">
+      <legend>${label}</legend>
+      <label class="tag-mode field-label">داشتن برچسب‌ها
+        <select class="text-input" data-tag-mode="${group}"><option value="any"${modes[group] !== 'all' ? ' selected' : ''}>دست‌کم یکی</option><option value="all"${modes[group] === 'all' ? ' selected' : ''}>همهٔ انتخاب‌ها</option></select>
+      </label>
+      <div class="tag-filter-grid">${SEARCH_FILTER_TAGS.filter((tag) => tag.group === group).map((tag) => `<div class="tag-filter" data-tag-row="${tag.key}" role="group" aria-labelledby="tag-label-${tag.key}">
+        <span class="tag-filter-label" id="tag-label-${tag.key}">${esc(tag.label)} <bdi class="tag-filter-count" data-tag-count="${tag.key}">(—)</bdi></span>
+        <span class="tag-filter-actions"><button type="button" data-tag="${tag.key}" data-tag-state="1" aria-pressed="false" aria-label="داشتن برچسب ${esc(tag.label)}" title="داشتن این برچسب">✓</button><button type="button" data-tag="${tag.key}" data-tag-state="-1" aria-pressed="false" aria-label="نداشتن برچسب ${esc(tag.label)}" title="نداشتن این برچسب">×</button></span>
+      </div>`).join('')}</div>
+    </fieldset>`).join('')}
+  </section>`;
+}
+
+function bindTagChoices(sheet, filters, modes, onChange) {
+  let category = 'all';
+  const query = $('#tag-filter-query', sheet);
+  const selection = $('#selected-filters', sheet);
+  const choices = SEARCH_FILTER_TAGS.map((tag) => ({
+    tag, row: sheet.querySelector(`[data-tag-row="${tag.key}"]`),
+    names: [tag.label, ...(tag.names || []), tag.code || ''].map(normalizeCompact),
+  }));
+  const filterChoices = () => {
+    const text = normalizeCompact(query.value);
+    let total = 0;
+    for (const [group] of TAG_GROUPS) {
+      let visible = 0;
+      for (const choice of choices) {
+        if (choice.tag.group !== group) continue;
+        choice.row.hidden = (category !== 'all' && category !== group) || !!text && !choice.names.some((name) => name.includes(text));
+        if (!choice.row.hidden) visible++;
+      }
+      sheet.querySelector(`[data-tag-group="${group}"]`).hidden = !visible;
+      total += visible;
+    }
+    $('#tag-filter-empty', sheet).hidden = !!total;
+    sheet.querySelectorAll('[data-tag-category]').forEach((button) => button.setAttribute('aria-pressed', button.dataset.tagCategory === category));
+  };
+  const drawCounts = () => {
+    for (const { tag, row } of choices) {
+      const count = tagCounts[tag.key];
+      $('[data-tag-count]', row).textContent = `(${Number.isInteger(count) ? fa(count) : '—'})`;
+    }
+  };
+  const draw = () => {
+    const active = SEARCH_FILTER_TAGS.filter((tag) => filters[tag.key] === 1 || filters[tag.key] === -1);
+    $('#tag-selection-count', sheet).textContent = `(${fa(active.length)})`;
+    $('#search-tab-tag-count', sheet).textContent = active.length ? fa(active.length) : '';
+    $('#search-tab-tag-count', sheet).hidden = !active.length;
+    $('#tag-filter-reset', sheet).disabled = !active.length;
+    selection.hidden = !active.length;
+    selection.innerHTML = active.map((tag) => `<button class="selected-filter" type="button" data-remove-tag="${tag.key}" data-state="${filters[tag.key]}" aria-label="برداشتن شرط ${filters[tag.key] === 1 ? 'داشتن' : 'نداشتن'} ${esc(tag.label)}"><span>${filters[tag.key] === 1 ? '✓' : '×'} ${esc(tag.label)}</span><span aria-hidden="true">×</span></button>`).join('');
+    sheet.querySelectorAll('[data-tag-mode]').forEach((select) => {
+      select.value = modes[select.dataset.tagMode] || 'any';
+    });
+    sheet.querySelectorAll('[data-category-count]').forEach((badge) => {
+      const count = active.filter((tag) => badge.dataset.categoryCount === 'all' || tag.group === badge.dataset.categoryCount).length;
+      badge.hidden = !count;
+      badge.textContent = fa(count);
+    });
+    for (const { tag, row } of choices) {
+      row.dataset.state = filters[tag.key] || 0;
+      row.querySelectorAll('[data-tag-state]').forEach((button) => button.setAttribute('aria-pressed', filters[tag.key] === +button.dataset.tagState));
+    }
+  };
+  query.addEventListener('input', filterChoices);
+  query.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      choices.find((choice) => !choice.row.hidden)?.row.querySelector('button').focus();
+    }
+  });
+  sheet.querySelectorAll('[data-tag-category]').forEach((button) => {
+    button.onclick = () => { category = button.dataset.tagCategory; filterChoices(); $('.search-builder-body', sheet).scrollTop = 0; };
+  });
+  sheet.querySelectorAll('[data-tag]').forEach((button) => {
+    button.onclick = () => {
+      const key = button.dataset.tag;
+      const state = +button.dataset.tagState;
+      if (filters[key] === state) delete filters[key];
+      else filters[key] = state;
+      draw();
+      onChange();
+    };
+  });
+  selection.onclick = (event) => {
+    const button = event.target.closest('[data-remove-tag]');
+    if (!button) return;
+    delete filters[button.dataset.removeTag];
+    draw();
+    (selection.querySelector('button') || $('#search-tab-tags', sheet)).focus();
+    onChange();
+  };
+  $('#tag-filter-reset', sheet).onclick = () => {
+    for (const key of Object.keys(filters)) delete filters[key];
+    for (const key of Object.keys(modes)) delete modes[key];
+    query.value = '';
+    filterChoices();
+    draw();
+    onChange();
+  };
+  sheet.querySelectorAll('[data-tag-mode]').forEach((select) => {
+    select.onchange = () => { modes[select.dataset.tagMode] = select.value; onChange(); };
+  });
+  draw();
+  drawCounts();
+  if (!tagCountsRequest) tagCountsRequest = call('filterCounts').then((data) => { tagCounts = data.counts; }).catch(() => { tagCountsRequest = null; });
+  const form = $('#search-builder', sheet);
+  tagCountsRequest.then(() => { if ($('#search-builder', sheet) === form) drawCounts(); });
+}
+
+function ruleGroupsHTML(groups) {
+  return groups.map((group, gi) => `<fieldset class="search-rule-group" data-group="${gi}">
+    <legend>گروه ${fa(gi + 1)}</legend>
+    <div class="search-group-tools">
+      <label for="group-match-${gi}">شرط‌های گروه</label>
+      <select class="text-input" id="group-match-${gi}" data-group-match>
+        <option value="all"${group.match === 'all' ? ' selected' : ''}>همهٔ شرط‌ها</option>
+        <option value="any"${group.match === 'any' ? ' selected' : ''}>دست‌کم یک شرط</option>
+      </select>
+      <button class="link-btn" type="button" data-remove-group${groups.length === 1 ? ' disabled' : ''}>حذف گروه</button>
+    </div>
+    ${group.rules.map((rule, ri) => {
+      const helper = SEARCH_HELPERS.find(([kind]) => kind === rule.kind);
+      const numeric = ['length', 'min-length', 'max-length'].includes(rule.kind);
+      const hint = helper[3] || '';
+      const hintId = `rule-hint-${gi}-${ri}`;
+      return `<div class="search-rule-row" data-rule="${ri}">
+        <label class="field-label search-rule-scope" for="rule-scope-${gi}-${ri}">جای جستجو
+          <select class="text-input" id="rule-scope-${gi}-${ri}" data-rule-scope>${SEARCH_SCOPES.map(([scope, label]) => `<option value="${scope}"${scope === (rule.scope || 'both') ? ' selected' : ''}>${label}</option>`).join('')}</select>
+        </label>
+        <label class="field-label" for="rule-kind-${gi}-${ri}">نوع شرط
+          <select class="text-input" id="rule-kind-${gi}-${ri}" data-rule-kind>${SEARCH_HELPERS.map(([kind, label]) => `<option value="${kind}"${kind === rule.kind ? ' selected' : ''}>${label}</option>`).join('')}</select>
+        </label>
+        <label class="field-label" for="rule-value-${gi}-${ri}"><span data-rule-label>${numeric ? 'تعداد نویسه‌ها' : 'نوشته'}</span>
+          <input class="text-input" id="rule-value-${gi}-${ri}" data-rule-value value="${esc(rule.value)}" placeholder="${helper[2]}" inputmode="${numeric ? 'numeric' : 'text'}" dir="${numeric || rule.kind === 'regex' || rule.kind === 'length-range' ? 'ltr' : 'rtl'}" aria-describedby="${hint ? hintId + ' ' : ''}search-builder-error" autocomplete="off" spellcheck="false" />
+        </label>
+        <button class="icon-btn search-remove-rule" type="button" data-remove-rule aria-label="حذف شرط ${fa(ri + 1)} از گروه ${fa(gi + 1)}">${icon('x')}</button>
+        <p class="search-guide" id="${hintId}" data-rule-hint${hint ? '' : ' hidden'}>${hint}</p>
+      </div>`;
+    }).join('')}
+    <button class="link-btn" type="button" data-add-rule>+ افزودن شرط</button>
+  </fieldset>`).join('');
+}
+
+function openSearchHelp(tab) {
+  let initialTab = tab || 'tags';
+  let groups = [{ match: 'all', rules: [{ kind: 'starts', value: '' }] }];
+  let match = 'any';
+  let flags = 'u';
+  const filters = { ...search.filters };
+  const tagMatch = { ...search.tagMatch };
+  let original = el.q.value;
+  try {
+    const current = readSearchBuilder(el.q.value);
+    groups = current.groups;
+    match = current.match;
+    if (current.query.mode === 'regex' || current.query.mode === 'scoped') {
+      flags = current.query.flags;
+      if (!tab) initialTab = 'pattern';
+    }
+  } catch {
+    // An incomplete query can still be replaced using the builder.
+    original = '';
+  }
+  openSheet(
+    `<header class="search-sheet-header">
+       <h3 id="search-help-title" tabindex="-1">جستجوی پیشرفته</h3>
+       <button class="icon-btn" id="search-close-header" type="button" aria-label="بستن">${icon('x')}</button>
+     </header>
+     <form id="search-builder" class="search-builder">
+       <div class="search-tabs" role="tablist" aria-label="بخش‌های جستجوی پیشرفته">
+         <button type="button" role="tab" id="search-tab-tags" data-search-tab="tags" aria-controls="search-panel-tags" aria-selected="true">برچسب‌ها <span id="search-tab-tag-count" hidden></span></button>
+         <button type="button" role="tab" id="search-tab-pattern" data-search-tab="pattern" aria-controls="search-panel-pattern" aria-selected="false" tabindex="-1">ساخت الگو</button>
+         <button type="button" role="tab" id="search-tab-help" data-search-tab="help" aria-controls="search-panel-help" aria-selected="false" tabindex="-1">راهنما</button>
+       </div>
+       <div class="search-builder-body">
+         <section id="search-panel-tags" role="tabpanel" aria-labelledby="search-tab-tags">${tagChoicesHTML(tagMatch)}</section>
+         <section id="search-panel-pattern" role="tabpanel" aria-labelledby="search-tab-pattern" hidden>
+           <p class="search-guide">شرط‌ها را ترکیب کنید؛ مانند «آغاز با ک»، «پایان با اب» و «طول ۴». برای شرط‌های جایگزین، گروه بیفزایید. شرط‌های خالی نادیده گرفته می‌شوند.</p>
+           <p class="search-guide">جای هر شرط را جدا برگزینید؛ مانند <bdi dir="ltr"><code>headword:/^ک/u AND meaning:/^آموزش$/u</code></bdi>. شرط‌های معنی می‌توانند در واژه‌های جداگانهٔ همان مدخل یا ترکیب پیدا شوند.</p>
+           <div class="search-builder-actions"><button class="btn ghost" type="button" id="search-add-group">+ افزودن گروه</button><button class="link-btn" type="button" id="search-clear-rules">پاک کردن شرط‌های واژه</button></div>
+           <div class="search-group-join" id="search-group-join" hidden>
+             <label class="field-label" for="search-group-match">رابطهٔ گروه‌ها</label>
+             <select class="text-input" id="search-group-match"><option value="any">دست‌کم یک گروه</option><option value="all">همهٔ گروه‌ها</option></select>
+           </div>
+           <div id="search-rule-groups"></div>
+           <label class="search-case-option"><input type="checkbox" id="search-ignore-case"${flags.includes('i') ? ' checked' : ''}/> حروف بزرگ و کوچک لاتین یکسان باشند</label>
+         </section>
+         <section id="search-panel-help" role="tabpanel" aria-labelledby="search-tab-help" hidden>
+           <h4>عبارت و الگو</h4>
+           <p class="search-guide">عبارت: <bdi dir="ltr"><code>«یاد»</code></bdi>؛ الگو: <bdi dir="ltr"><code>/^یاد/</code></bdi>. هر دو در واژه‌ها، ترکیب‌ها و معنی‌ها جستجو می‌شوند.</p>
+           <p class="search-guide"><bdi dir="ltr"><code>«یاد»</code></bdi> «یادگار» را هم می‌یابد؛ <bdi dir="ltr"><code>«یاد »</code></bdi> پس از «یاد» فاصله می‌خواهد. برای کل واژه یا ترکیب، «برابری کامل» را انتخاب کنید؛ در معنی‌ها، این شرط هر واژه را جداگانه می‌سنجد.</p>
+           <p class="search-guide">در معنی‌ها، الگو هر واژه را جداگانه می‌سنجد؛ ^ و $ آغاز و پایان همان واژه‌اند. حرف‌ها و رقم‌ها یکدست، و اعراب و نیم‌فاصله حذف می‌شوند. برای چند واژهٔ پشت‌سرهم از گیومه استفاده کنید. عبارت‌های کوتاه داخل پرانتز در این جستجو بررسی نمی‌شوند.</p>
+           <h4>برچسب‌ها و یادکردها</h4>
+           <p class="search-guide">برای هر برچسب، هر واژه یا ترکیب یک بار شمرده می‌شود. شمارها با جستجو یا انتخاب برچسب تغییر نمی‌کنند.</p>
+           <p class="search-guide">در هر دسته، «دست‌کم یکی» کافی است؛ برای الزام همه، «همهٔ انتخاب‌ها» را برگزینید. دسته‌ها با هم ترکیب می‌شوند.</p>
+           <p class="search-guide">ریشه و نوع واژه از آغاز توضیح خوانده می‌شوند. موضوع و کاربرد باید در یک معنی باشند؛ × معنی‌های بدون آن برچسب را می‌یابد. ترکیب‌ها برچسب‌های خودشان را دارند.</p>
+           <p class="search-guide">یادکرد در کل مدخل یا ترکیب جستجو می‌شود؛ هر معنی لزوماً از آن اثر نیست. یادکردهای ترکیب از واژهٔ اصلی جدا هستند.</p>
+           <p class="search-guide">همین نوشته در نوار جستجو قرار می‌گیرد؛ برچسب‌ها جداگانه اعمال می‌شوند.</p>
+           <details class="search-reference"><summary>نشانه‌های الگو</summary>
+       <dl><dt><code>^</code> / <code>$</code></dt><dd>آغاز / پایانِ واژه</dd>
+       <dt><code>.</code> / <code>.*</code></dt><dd>یک نویسه / هر تعداد نویسه</dd>
+       <dt><code>[ابپ]</code></dt><dd>یکی از ا، ب یا پ</dd>
+       <dt><code>(یاد|خاطر)</code></dt><dd>یکی از دو گزینه</dd>
+       <dt><code>{4}</code> / <code>{2,5}</code></dt><dd>۴ بار / ۲ تا ۵ بار؛ شمار تکرار را لاتین بنویسید.</dd>
+       <dt><code>?</code> / <code>+</code></dt><dd>اختیاری / یک یا چند بار تکرار</dd>
+       <dt><code>\\.</code></dt><dd>خود نقطه؛ برای نشانهٔ ویژه، پیش از آن \\ بگذارید.</dd></dl>
+     </details>
+         </section>
+       </div>
+       <footer class="search-builder-footer">
+         <label class="field-label" for="search-preview">نوشتهٔ جستجو</label>
+         <output class="search-preview" id="search-preview" dir="rtl"></output>
+         <p class="search-builder-error" id="search-builder-error" aria-live="polite"></p>
+         <div class="sheet-row"><button class="btn" id="search-apply" type="submit">جستجو</button><button class="btn ghost" id="search-help-close" type="button">بستن</button></div>
+       </footer>
+     </form>`,
+    (sheet) => {
+      sheet.setAttribute('aria-labelledby', 'search-help-title');
+      sheet.classList.add('search-sheet');
+      const tabs = [...sheet.querySelectorAll('[data-search-tab]')];
+      const selectTab = (name) => {
+        for (const button of tabs) {
+          const selected = button.dataset.searchTab === name;
+          button.setAttribute('aria-selected', selected);
+          button.tabIndex = selected ? 0 : -1;
+          $(`#${button.getAttribute('aria-controls')}`, sheet).hidden = !selected;
+        }
+        $('.search-builder-body', sheet).scrollTop = 0;
+      };
+      tabs.forEach((button) => { button.onclick = () => selectTab(button.dataset.searchTab); });
+      sheet.onkeydown = (event) => {
+        const tab = event.target.closest('[data-search-tab]');
+        if (tab && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+          event.preventDefault();
+          const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+            : (tabs.indexOf(tab) + (event.key === 'ArrowLeft' ? 1 : -1) + tabs.length) % tabs.length;
+          selectTab(tabs[index].dataset.searchTab);
+          tabs[index].focus();
+        }
+        if (event.key === 'Tab') {
+          const controls = [...sheet.querySelectorAll('button:not(:disabled), input, select:not(:disabled), summary, [tabindex="0"]')]
+            .filter((node) => node.tabIndex >= 0 && node.getClientRects().length);
+          const first = controls[0];
+          const last = controls[controls.length - 1];
+          if (event.shiftKey && (event.target === first || event.target.id === 'search-help-title')) {
+            event.preventDefault(); last.focus();
+          } else if (!event.shiftKey && event.target === last) {
+            event.preventDefault(); first.focus();
+          }
+        }
+      };
+      $('#search-close-header', sheet).onclick = closeSheet;
+      const container = $('#search-rule-groups', sheet);
+      const join = $('#search-group-join', sheet);
+      const joinSelect = $('#search-group-match', sheet);
+      const preview = $('#search-preview', sheet);
+      const error = $('#search-builder-error', sheet);
+      const apply = $('#search-apply', sheet);
+      let built = '';
+      const update = () => {
+        try {
+          built = buildWordQuery(groups, match, flags, original);
+          preview.textContent = built || (hasTagFilters(filters) ? 'جستجو فقط با برچسب‌ها' : '');
+          preview.dir = built.startsWith('/') || parseSearchQuery(built).mode === 'scoped' ? 'ltr' : 'auto';
+          error.textContent = '';
+          apply.disabled = false;
+        } catch (e) {
+          built = '';
+          preview.textContent = '…';
+          const hasInput = groups.some((group) => group.rules.some((rule) => rule.value.trim()));
+          error.textContent = hasInput ? e.message : '';
+          apply.disabled = true;
+        }
+      };
+      const draw = () => {
+        container.innerHTML = ruleGroupsHTML(groups);
+        join.hidden = groups.length < 2;
+        joinSelect.value = match;
+      };
+      const focusRule = (gi, ri) => $(`#rule-value-${gi}-${ri}`, sheet)?.focus();
+      container.addEventListener('input', (event) => {
+        const input = event.target.closest('[data-rule-value]');
+        if (!input) return;
+        const gi = +input.closest('[data-group]').dataset.group;
+        const ri = +input.closest('[data-rule]').dataset.rule;
+        groups[gi].rules[ri].value = input.value;
+        update();
+      });
+      container.addEventListener('change', (event) => {
+        const gi = +event.target.closest('[data-group]').dataset.group;
+        if (event.target.matches('[data-group-match]')) groups[gi].match = event.target.value;
+        else if (event.target.matches('[data-rule-scope]')) {
+          const ri = +event.target.closest('[data-rule]').dataset.rule;
+          groups[gi].rules[ri].scope = event.target.value;
+        } else if (event.target.matches('[data-rule-kind]')) {
+          const row = event.target.closest('[data-rule]');
+          const rule = groups[gi].rules[+row.dataset.rule];
+          rule.kind = event.target.value;
+          const helper = SEARCH_HELPERS.find(([kind]) => kind === rule.kind);
+          const input = $('[data-rule-value]', row);
+          const numeric = ['length', 'min-length', 'max-length'].includes(rule.kind);
+          input.placeholder = helper[2];
+          input.inputMode = numeric ? 'numeric' : 'text';
+          input.dir = numeric || rule.kind === 'regex' || rule.kind === 'length-range' ? 'ltr' : 'rtl';
+          $('[data-rule-label]', row).textContent = numeric ? 'تعداد نویسه‌ها' : 'نوشته';
+          const hint = $('[data-rule-hint]', row);
+          hint.textContent = helper[3] || '';
+          hint.hidden = !helper[3];
+          input.setAttribute('aria-describedby', `${helper[3] ? hint.id + ' ' : ''}search-builder-error`);
+        }
+        update();
+      });
+      container.addEventListener('click', (event) => {
+        const button = event.target.closest('button');
+        if (!button) return;
+        const gi = +button.closest('[data-group]').dataset.group;
+        if (button.matches('[data-add-rule]')) {
+          groups[gi].rules.push({ kind: 'contains', value: '' });
+          draw();
+          focusRule(gi, groups[gi].rules.length - 1);
+        } else if (button.matches('[data-remove-rule]')) {
+          const ri = +button.closest('[data-rule]').dataset.rule;
+          groups[gi].rules.splice(ri, 1);
+          if (!groups[gi].rules.length) groups[gi].rules.push({ kind: 'contains', value: '' });
+          draw();
+          focusRule(gi, Math.min(ri, groups[gi].rules.length - 1));
+        } else if (button.matches('[data-remove-group]') && groups.length > 1) {
+          groups.splice(gi, 1);
+          draw();
+          focusRule(Math.min(gi, groups.length - 1), 0);
+        }
+        update();
+      });
+      joinSelect.onchange = () => {
+        match = joinSelect.value;
+        update();
+      };
+      $('#search-add-group', sheet).onclick = () => {
+        groups.push({ match: 'all', rules: [{ kind: 'contains', value: '' }] });
+        draw();
+        focusRule(groups.length - 1, 0);
+        update();
+      };
+      $('#search-clear-rules', sheet).onclick = () => {
+        groups = [{ match: 'all', rules: [{ kind: 'starts', value: '' }] }];
+        match = 'any';
+        draw();
+        focusRule(0, 0);
+        update();
+      };
+      $('#search-ignore-case', sheet).onchange = (event) => {
+        flags = flags.replace(/i/g, '') + (event.target.checked ? 'i' : '');
+        for (const group of groups) for (const rule of group.rules) delete rule.flags;
+        update();
+      };
+      bindTagChoices(sheet, filters, tagMatch, update);
+      $('#search-builder', sheet).addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (apply.disabled) return;
+        const q = built;
+        search.filters = { ...filters };
+        search.tagMatch = { ...tagMatch };
+        closeSheet();
+        el.q.value = q;
+        runSearch(el.q.value);
+        el.q.focus();
+      });
+      $('#search-help-close', sheet).onclick = closeSheet;
+      draw();
+      update();
+      selectTab(initialTab);
+      $('#search-help-title', sheet).focus({ preventScroll: true });
+    },
+  );
+}
+$('#btn-search-help').addEventListener('click', () => openSearchHelp());
+$('#btn-search-filters').addEventListener('click', () => openSearchHelp('tags'));
+$('#btn-clear-filters').addEventListener('click', () => {
+  search.filters = {};
+  search.tagMatch = {};
+  runSearch(el.q.value);
+});
 
 function openListsSheet(entry) {
   const draw = () => {
@@ -706,6 +1295,16 @@ async function downloadAll() {
   bar.hidden = false;
   const meta = await fetch('data/meta.json', { cache: 'no-cache' }).then((r) => r.json());
   const files = ['data/words.txt', 'data/phrases.txt', 'data/phrase-parents.txt'];
+  if (compatibleTagIndex(meta.tagVersion)) files.push('data/entry-tags.txt', 'data/phrase-tags.txt');
+  if (compatibleSenseIndex(meta.senseVersion)) {
+    files.push('data/sense-meta.txt');
+    for (const id of new Set(meta.senseShardKeys.map(([, id]) => id))) files.push(`data/s/${id}.txt`);
+  }
+  if (meta.sourceVersion === SOURCE_VERSION) {
+    for (let id = 0; id < meta.sourceCounts.length; id++) files.push(`data/r/${id}.txt`);
+    if (meta.sourceSenseRows) files.push('data/source-senses.txt');
+    for (const id of new Set(meta.sourceSenseShardKeys.map(([, id]) => id))) files.push(`data/u/${id}.txt`);
+  }
   for (let i = 0; i < meta.blockStarts.length; i++) files.push(`data/m/${i}.txt`);
   for (let i = 0; i < meta.shards; i++) files.push(`data/t/${i}.txt`);
   for (let i = 0; i < files.length; i++) files[i] += `?v=${meta.build}`;

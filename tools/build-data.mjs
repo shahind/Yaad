@@ -5,7 +5,13 @@
 //   words.txt                 gzip text: one display headword per line, line i = entry i
 //   phrases.txt               gzip text: one sub-entry phrase per line (e.g. «به یاد آوردن» inside «یاد»)
 //   phrase-parents.txt        gzip Uint32 LE: parent entry id of each phrase line
+//   entry-tags.txt            gzip Uint64 LE: origin and grammar bits per entry
+//   phrase-tags.txt           gzip Uint64 LE: each compound's own opening labels
 //   m/<n>.txt                 gzip text blocks of meanings: records "pron \x1f body" joined by \x1e
+//   sense-meta.txt            gzip JSON: ranges/labels for senses of labelled entries
+//   s/<n>.txt                 gzip sparse token -> sense postings
+//   r/<id>.txt                gzip delta-varint owners per named source
+//   source-senses.txt, u/     compound owner scopes/postings not already in s/
 //   t/<n>.txt                 gzip inverted-index shards for full-text (meaning) search
 //
 // Meaning markup (control chars instead of HTML, rendered by the app):
@@ -17,6 +23,10 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { allRows } from './sqlparse.mjs';
 import { tokenize, normalizeCompact } from '../www/js/normalize.js';
+import { TAG_VERSION } from '../www/js/search-origin-grammar.js';
+import { SENSE_VERSION, readOpeningTags, splitSenses } from '../www/js/search-subject-usage.js';
+import { SOURCE_VERSION, SOURCE_TAGS, sourceOwners } from '../www/js/search-citations.js';
+import { writeTokenShards, writeSourceIndex, TAG_COUNTS_VERSION, countTags, indexableMeaning as plain, scopedTokens } from './search-index.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = path.join(ROOT, 'DB');
@@ -66,7 +76,8 @@ function convert(word, html) {
     const t = clean(inner);
     if (!/[\p{L}\p{N}]/u.test(t)) return ` ${t} `;
     if (/^\s*؛/.test(str.slice(off + match.length, off + match.length + 8)) && t.length >= 2 && t.length <= 70) {
-      phrases.push(t);
+      const opening = clean(str.slice(off + match.length, off + match.length + 1024));
+      phrases.push({ word: t, tags: readOpeningTags(opening).mask });
     }
     return `\x05${t}\x06`;
   });
@@ -80,23 +91,6 @@ function convert(word, html) {
     .replace(/\n{2,}/g, '\n')
     .replace(/^[\s\n]+|[\s\n]+$/g, '');
   return { pron: persianDigits(pron), body: m, phrases };
-}
-
-// Plain text of a converted body for indexing. Citations (poet/source) and short
-// parentheticals — mostly source references such as «(منتهی الارب )» or grammar tags
-// such as «(ع اِ)» — are left out: they are noise for meaning search.
-const plain = (body) =>
-  body
-    .replace(/\x02[^\x03]*\x03/g, ' ')
-    .replace(/\([^()\n]{0,40}\)/g, ' ')
-    .replace(/[\x00-\x1f]/g, ' ');
-
-function varint(arr, n) {
-  while (n >= 0x80) {
-    arr.push((n & 0x7f) | 0x80);
-    n >>>= 7;
-  }
-  arr.push(n);
 }
 
 // ---------------------------------------------------------------------------
@@ -114,22 +108,49 @@ console.time('convert');
 const words = [];
 const phraseTexts = [];
 const phraseParents = [];
+const entryTags = new BigUint64Array(rows.length);
+const phraseTags = [];
+const senseRows = [];
+const compoundRows = [];
+let sourceCompoundEntries = 0;
 const blockStarts = [];
 const bodies = new Array(rows.length);
 const records = new Array(rows.length);
+const sourcePostings = SOURCE_TAGS.map(() => []);
+let sourceScanMs = 0;
 rows.forEach((r, id) => {
   const word = r.word.replace(/\s+/g, ' ').trim();
   words.push(word);
   const { pron, body, phrases } = convert(word, r.meaning);
+  entryTags[id] = readOpeningTags(body).mask;
   bodies[id] = body;
   records[id] = `${pron}\x1f${body}`;
   const seen = new Set([normalizeCompact(word)]);
+  const phraseIds = new Map([[normalizeCompact(word), -1]]);
   for (const p of phrases) {
-    const k = normalizeCompact(p);
+    const k = normalizeCompact(p.word);
     if (!k || seen.has(k)) continue;
     seen.add(k);
-    phraseTexts.push(p);
+    phraseIds.set(k, phraseTexts.length);
+    phraseTexts.push(p.word);
     phraseParents.push(id);
+    phraseTags.push(p.tags);
+  }
+  const senses = splitSenses(body, phraseIds);
+  const sourceStart = performance.now();
+  let citedCompound = false;
+  for (const [owner, sources] of sourceOwners(body, senses)) {
+    if (owner < 0) continue;
+    if (owner > 0) citedCompound = true;
+    const sourceOwner = owner === 0 ? id : rows.length + owner - 1;
+    for (const source of sources) sourcePostings[source].push(sourceOwner);
+  }
+  sourceScanMs += performance.now() - sourceStart;
+  if (citedCompound) sourceCompoundEntries++;
+  if (senses.some((sense) => sense.facets.length)) {
+    for (const sense of senses) senseRows.push([id, sense.phrase, sense.start, sense.end, sense.facets]);
+  } else if (senses.some((sense) => sense.phrase !== 0)) {
+    for (const sense of senses) compoundRows.push([id, sense.phrase, sense.start, sense.end, sense.facets]);
   }
 });
 
@@ -172,6 +193,13 @@ const wordsBytes = write('words.txt', gz(Buffer.from(words.join('\n'), 'utf8')))
 const phrasesBytes = write('phrases.txt', gz(Buffer.from(phraseTexts.join('\n'), 'utf8')));
 const pp = new Uint32Array(phraseParents);
 const ppBytes = write('phrase-parents.txt', gz(Buffer.from(pp.buffer)));
+const entryTagBytes = write('entry-tags.txt', gz(Buffer.from(entryTags.buffer)));
+const phraseTagBytes = write('phrase-tags.txt', gz(Buffer.from(new BigUint64Array(phraseTags).buffer)));
+const sourceWriteStart = performance.now();
+const sourceIndex = writeSourceIndex(sourcePostings, (file, bytes) => write(file, gz(bytes)));
+sourcePostings.length = 0;
+console.log('source index', { bytes: sourceIndex.indexBytes, rawBytes: sourceIndex.rawBytes,
+  postings: sourceIndex.postingCount, scanMs: Math.round(sourceScanMs), writeMs: Math.round(performance.now() - sourceWriteStart) });
 
 // ---------------------------------------------------------------------------
 // Full-text index. Score per (token, entry) = BM25 term weight × early-position boost,
@@ -235,79 +263,58 @@ for (let id = 0; id < N; id++) {
 // starts with a given prefix ("یاد" -> "یادگار", "یادآوری", …) by loading only a few files.
 // A prefix group that is too large is split by its next character (a trie); small sibling
 // groups are then packed together. meta.shardKeys maps each group prefix to its file.
-const SHARD_BUDGET = 160 * 1024; // raw bytes per shard file
-const enc = new TextEncoder();
-const allTokens = [...postings.keys()].sort();
-const encoded = allTokens.map((t) => {
-  const arr = postings.get(t);
-  const body = [];
-  let prev = 0;
-  for (let i = 0; i < arr.length; i += 2) {
-    varint(body, (arr[i] - prev) * 16 + arr[i + 1]);
-    prev = arr[i];
-  }
-  return { t, tb: enc.encode(t), body, count: arr.length / 2 };
-});
-const sizeOf = (e) => e.tb.length + e.body.length + 8;
-const groups = []; // { key, from, to } over `encoded`, in sorted order
-function partition(from, to, prefix) {
-  let size = 0;
-  for (let i = from; i < to; i++) size += sizeOf(encoded[i]);
-  if (size <= SHARD_BUDGET || to - from <= 1) {
-    groups.push({ key: prefix, from, to, size });
-    return;
-  }
-  const depth = prefix.length;
-  let i = from;
-  if (encoded[i].t.length === depth) {
-    groups.push({ key: prefix, from: i, to: i + 1, size: sizeOf(encoded[i]) });
-    i++;
-  }
-  while (i < to) {
-    const c = encoded[i].t[depth];
-    let j = i;
-    while (j < to && encoded[j].t[depth] === c) j++;
-    partition(i, j, prefix + c);
-    i = j;
-  }
-}
-partition(0, encoded.length, '');
-
-const shardKeys = [];
-let indexBytes = 0;
-let postingCount = 0;
-let shardCount = 0;
-for (let g = 0; g < groups.length; ) {
-  const members = [];
-  let size = 0;
-  while (g < groups.length && (members.length === 0 || size + groups[g].size <= SHARD_BUDGET)) {
-    size += groups[g].size;
-    members.push(groups[g++]);
-  }
-  const head = [];
-  const body = [];
-  const n = members.reduce((a, m) => a + m.to - m.from, 0);
-  varint(head, n);
-  for (const m of members) {
-    shardKeys.push([m.key, shardCount]);
-    for (let i = m.from; i < m.to; i++) {
-      const e = encoded[i];
-      varint(head, e.tb.length);
-      for (const x of e.tb) head.push(x);
-      varint(head, e.count);
-      varint(head, e.body.length);
-      for (const x of e.body) body.push(x);
-      postingCount += e.count;
-    }
-  }
-  indexBytes += write(`t/${shardCount}.txt`, gz(Buffer.concat([Buffer.from(head), Buffer.from(body)])));
-  shardCount++;
-}
+const writeIndex = (file, bytes) => write(file, gz(bytes));
+const { shardKeys, shardCount, indexBytes, postingCount } = writeTokenShards(postings, writeIndex);
 console.log('index shards', shardCount, 'keys', shardKeys.length);
 console.timeEnd('index');
 
+// Only entries with subject/usage labels need a second set of postings. Keep all
+// their senses, including unlabelled ones, so exclusion filters remain accurate.
+function writeScopedIndex(scopeRows, directory) {
+  const postings = new Map();
+  let previousEntry = -1;
+  let consumed = 0;
+  for (let sense = 0; sense < scopeRows.length; sense++) {
+    const [id, , start, end] = scopeRows[sense];
+    if (id !== previousEntry) { previousEntry = id; consumed = 0; }
+    const { tokens, skip } = scopedTokens(bodies[id].slice(start, end));
+    const indexed = tokens.slice(skip, Math.max(skip, MAX_POSTINGS_TOKEN_POS - consumed));
+    consumed += tokens.length;
+    for (const token of new Set(indexed)) {
+      if (stop.has(token)) continue;
+      if (!postings.has(token)) postings.set(token, []);
+      postings.get(token).push(sense, 0);
+    }
+  }
+  return writeTokenShards(postings, writeIndex, directory);
+}
+const senseIndex = writeScopedIndex(senseRows, 's');
+const senseMetaBytes = write('sense-meta.txt', gz(Buffer.from(JSON.stringify(senseRows))));
+const compoundScopeStart = performance.now();
+const compoundIndex = compoundRows.length ? writeScopedIndex(compoundRows, 'u') : { shardKeys: [], indexBytes: 0 };
+const compoundMetaBytes = compoundRows.length ? write('source-senses.txt', gz(Buffer.from(JSON.stringify(compoundRows)))) : 0;
+console.log('compound scopes', { rows: compoundRows.length, bytes: compoundIndex.indexBytes + compoundMetaBytes,
+  postings: compoundIndex.postingCount || 0, buildMs: Math.round(performance.now() - compoundScopeStart) });
+
+const tagCountStart = performance.now();
+const tagCounts = countTags(entryTags, phraseTags, senseRows);
+console.log('tag totals', { ms: Math.round(performance.now() - tagCountStart),
+  metadataBytes: Buffer.byteLength(JSON.stringify({ tagCountsVersion: TAG_COUNTS_VERSION, tagCounts })) - 1 });
+
 const meta = {
   version: 1,
+  tagCountsVersion: TAG_COUNTS_VERSION,
+  tagCounts,
+  tagVersion: TAG_VERSION,
+  sourceVersion: SOURCE_VERSION,
+  compoundScopeVersion: 1,
+  sourceCounts: sourceIndex.counts,
+  sourceCompoundEntries,
+  sourceSenseRows: compoundRows.length,
+  sourceSenseShardKeys: compoundIndex.shardKeys,
+  senseVersion: SENSE_VERSION,
+  senseRows: senseRows.length,
+  senseShardKeys: senseIndex.shardKeys,
   build: Date.now().toString(36),
   entries: N,
   phrases: phraseTexts.length,
@@ -318,9 +325,12 @@ const meta = {
   charset: charset.join(''),
   built: new Date().toISOString(),
 };
-write('meta.json', Buffer.from(JSON.stringify(meta)));
+const metaBytes = write('meta.json', Buffer.from(JSON.stringify(meta)));
 
-const mb = (n) => (n / 1048576).toFixed(1) + ' MB';
+const totalBytes = packedBytes + wordsBytes + phrasesBytes + ppBytes + entryTagBytes + phraseTagBytes
+  + indexBytes + senseIndex.indexBytes + senseMetaBytes + sourceIndex.indexBytes
+  + compoundIndex.indexBytes + compoundMetaBytes + metaBytes;
+const mb = (n) => (n / 1048576).toFixed(2) + ' MiB';
 console.log({
   phrases: phraseTexts.length,
   blocks: blockStarts.length,
@@ -328,7 +338,14 @@ console.log({
   meanings: mb(packedBytes),
   words: mb(wordsBytes),
   phrasesFile: mb(phrasesBytes + ppBytes),
+  tags: mb(entryTagBytes + phraseTagBytes),
+  sources: mb(sourceIndex.indexBytes),
+  compoundScopes: mb(compoundIndex.indexBytes + compoundMetaBytes),
+  senses: senseRows.length,
+  senseIndex: mb(senseIndex.indexBytes + senseMetaBytes),
   postings: postingCount,
   index: mb(indexBytes),
-  total: mb(packedBytes + wordsBytes + phrasesBytes + ppBytes + indexBytes),
+  metadata: mb(metaBytes),
+  totalBytes,
+  total: mb(totalBytes),
 });

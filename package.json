@@ -17,7 +17,8 @@
   "main": "electron/main.cjs",
   "scripts": {
     "build:data": "node --max-old-space-size=8192 tools/build-data.mjs",
-    "test": "node tools/test-search.mjs",
+    "test": "node tools/test-query.mjs && node tools/test-search.mjs",
+    "test:query": "node tools/test-query.mjs",
     "serve": "node tools/serve.mjs",
     "vendor": "node -e \"require('fs').copyFileSync('node_modules/@capacitor/core/dist/capacitor.js','www/js/vendor/capacitor.js')\"",
     "electron": "electron .",

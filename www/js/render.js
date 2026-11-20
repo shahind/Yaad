@@ -2,9 +2,41 @@
 //   \n line break, \x01 new sense, \x02..\x03 citation, \x04 sub-entry,
 //   \x05..\x06 highlighted phrase, \x0e..\x0f inline pronunciation
 import { normalizeCompact, termTester } from './normalize.js';
+import { literalRange } from './search-match-text.js';
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
 export const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ESC[c]);
+
+export function markMatch(text, match) {
+  if (!match || match.end <= match.start) return esc(text);
+  const start = Math.max(0, match.start);
+  const end = Math.min(text.length, match.end);
+  return esc(text.slice(0, start)) + '<mark>' + esc(text.slice(start, end)) + '</mark>' + esc(text.slice(end));
+}
+
+export function markLiteral(root, needle, before) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  const range = literalRange(nodes.map((node) => node.nodeValue), needle, before);
+  if (!range) return [];
+  const marks = [];
+  for (let i = range.start.part; i <= range.end.part; i++) {
+    const node = nodes[i];
+    const text = node.nodeValue;
+    const from = i === range.start.part ? range.start.offset : 0;
+    const to = i === range.end.part ? range.end.offset : text.length;
+    if (to <= from) continue;
+    const fragment = document.createDocumentFragment();
+    fragment.append(text.slice(0, from));
+    const mark = document.createElement('mark');
+    mark.textContent = text.slice(from, to);
+    fragment.append(mark, text.slice(to));
+    node.replaceWith(fragment);
+    marks.push(mark);
+  }
+  return marks;
+}
 
 const inline = (s) =>
   esc(s)
@@ -57,9 +89,9 @@ export function meaningText(body) {
 }
 
 // Wrap words of `root` whose normalized form is in `terms` with <mark>.
-export function markTerms(root, terms) {
+export function markTerms(root, terms, exact = false) {
   if (!terms || !terms.length) return [];
-  const test = termTester(terms);
+  const test = termTester(terms, exact);
   const marks = [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const nodes = [];
@@ -90,7 +122,12 @@ export function markTerms(root, terms) {
 }
 
 // Highlight a query inside headword text (normalization-aware, best effort).
-export function highlightWord(word, query) {
+export function highlightWord(word, query, match) {
+  // Regex offsets come from the isolated worker; never execute user regexes on the UI thread.
+  if (match) {
+    if (match.start === match.end) return esc(word);
+    return esc(word.slice(0, match.start)) + '<b>' + esc(word.slice(match.start, match.end)) + '</b>' + esc(word.slice(match.end));
+  }
   const q = normalizeCompact(query);
   if (!q) return esc(word);
   // Map compact-normalized positions back to original characters.

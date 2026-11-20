@@ -44,6 +44,10 @@ Microsoft signs it, so no code-signing certificate is needed.
   regardless of spaces / ZWNJ, Arabic letter variants (ي/ك/ة…), diacritics or hamza forms.
 - **Search inside meanings**: «یاد» also finds «خاطره» (whose meaning lists «یادگار»),
   ranked by relevance (synonym-style definitions and early mentions first).
+- **Quoted and regex search**: `"یاد آوردن"` / `«یاد آوردن»` preserve spaces; `/^یاد/`
+  matches headwords and normalized indexed words in meanings. Quoted meaning phrases check up to 1,000 candidates.
+- **Advanced search**: pattern helpers and independent origin, grammar, subject, usage and citation filters.
+  Subject/usage filters match one meaning; citations match the entry or compound. Tag counts are global.
 - **Favorites and custom lists** (create / rename / delete / share a list).
 - **Copy** a meaning, **share** a word (native share sheet on Android/iOS).
 - **Dark / light / automatic theme**, adjustable reading size, recent history, random word.
@@ -60,11 +64,11 @@ Microsoft signs it, so no code-signing certificate is needed.
 | | |
 |---|---|
 | Source SQL dumps | 255 MB |
-| Shipped data | **≈ 56 MB** (39 MB meanings, 16 MB full-text index, 1 MB headwords) |
+| Shipped data | **≈ 61 MiB** (39 MiB meanings, 16 MiB full-text index, 6 MiB headwords and tag/compound indexes) |
 | Startup (index load) | ≈ 250 ms |
-| Headword search | 2 – 20 ms per keystroke |
-| Meaning search | 10 – 25 ms |
-| Memory | ≈ 30 MB of data structures; meanings are loaded in 64 KB blocks on demand (LRU cache) |
+| Headword search (plain text) | 2 – 20 ms per keystroke |
+| Meaning search (plain text) | 10 – 25 ms |
+| Memory | Meanings are loaded in 64 KB blocks on demand (48-block LRU cache); filter indexes load when selected. |
 
 All searching runs in a Web Worker, so typing never blocks the UI.
 
@@ -77,9 +81,12 @@ The SQL dumps in `DB/` (one per starting letter) are converted once by
 |---|---|
 | `words.txt` | every headword, one per line (gzip). Loaded at startup. |
 | `phrases.txt`, `phrase-parents.txt` | sub-entry phrases (♦ …؛) and the entry each belongs to. |
+| `entry-tags.txt`, `phrase-tags.txt` | gzip Uint64 bit masks for each entry's or compound's opening origin and grammar labels; loaded on demand for tag filters. |
+| `sense-meta.txt`, `s/<n>.txt` | gzip sense ranges/labels and token postings for entries with subject or usage labels; loaded on demand. |
+| `r/<id>.txt`, `source-senses.txt`, `u/<n>.txt` | source-owner postings and additional compound scopes; loaded on demand for source filters. |
 | `m/<n>.txt` | meanings in ~64 KB blocks. HTML is reduced to a tiny control-character markup and text is transcoded to a **single-byte charset** (Persian letters are 2 bytes in UTF‑8) before gzip — 16 % smaller than gzip alone. |
 | `t/<n>.txt` | full-text inverted index, **sharded by token prefix** (a size-bounded trie), so a query loads only the shards it needs and can expand prefixes («یاد» → «یادگار»…). Postings are delta + varint encoded with a 4-bit relevance score (BM25 × position × synonym boost). |
-| `meta.json` | block table, shard table, charset, stop-words, build id. |
+| `meta.json` | block table, shard tables, charset, stop-words, tag/sense/source/compound format versions, build id. |
 
 Why not one file per letter? A word can appear anywhere: «یاد» must match «به یاد آوردن»
 (starts with «ب») and the meaning of «خاطره». So the app keeps *all* headwords in memory
@@ -109,10 +116,12 @@ Requires Node.js 20+.
 
 ```bash
 npm install
-npm run build:data      # DB/*.sql -> www/data (≈ 1 minute)
+npm run build:data      # DB/*.sql -> www/data (may take several minutes)
 npm test                # search smoke tests
 npm run serve           # http://localhost:5173
 ```
+
+Quick checks without generated dictionary data: `npm run test:query`.
 
 **Windows / Linux (Electron)**
 
