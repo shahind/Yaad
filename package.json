@@ -1,6 +1,6 @@
 {
   "name": "yaad",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Yaad (یاد) — fast, lightweight, fully offline Dehkhoda dictionary for web, Android, iOS, Windows and Linux",
   "author": {
@@ -46,7 +46,7 @@
     "vazirmatn": "^33.0.3"
   },
   "build": {
-    "appId": "io.github.shahind.yaad",
+    "appId": "com.shahinsoft.yaad",
     "productName": "Yaad",
     "copyright": "Yaad — Dehkhoda dictionary",
     "directories": {

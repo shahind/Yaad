@@ -1824,3 +1824,9 @@ html {
     background: var(--bg);
   }
 }
+
+/* Web version: link to the Android app */
+.store-link {
+  color: var(--primary);
+  font-weight: 700;
+}

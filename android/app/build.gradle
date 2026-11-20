@@ -1,14 +1,14 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "io.github.shahind.yaad"
+    namespace = "com.shahinsoft.yaad"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "io.github.shahind.yaad"
+        applicationId "com.shahinsoft.yaad"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 4
-        versionName "1.1.0"
+        versionCode 5
+        versionName "1.1.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -21,6 +21,7 @@ android {
     def ksProps = new Properties()
     def ksPath = System.getenv('YAAD_KEYSTORE_PROPERTIES')
     if (ksPath && file(ksPath).exists()) file(ksPath).withInputStream { ksProps.load(it) }
+    project.ext.releaseKs = ksProps
     signingConfigs {
         release {
             if (ksProps['storeFile']) {
@@ -68,3 +69,40 @@ try {
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
 }
+
+// Cafe Bazaar: every signed bundleRelease also writes app-release.bin (the signed digest
+// Bazaar asks for) next to app-release.aab, using Bazaar's bundlesigner. The jar is fetched
+// once from github.com/cafebazaar/bundle-signer into tools/bazaar/ (git-ignored) and checked
+// against its SHA-256. Set bundleSigner=<path to jar> in the keystore properties to override.
+def bundleSignerVersion = '0.1.14'
+def bundleSignerSha256 = 'aef2c387f678558e3a4baddab9730fbdca64ef28a0e2e0245491e1088b4968f5'
+tasks.register('bazaarBin', Exec) {
+    def ks = project.ext.releaseKs
+    def aab = file("$buildDir/outputs/bundle/release/app-release.aab")
+    def jar = file(ks['bundleSigner'] ?: "$rootDir/../tools/bazaar/bundlesigner-${bundleSignerVersion}.jar")
+    onlyIf {
+        def ok = ks['storeFile'] && aab.exists()
+        if (!ok) logger.warn("bazaarBin skipped: needs the release keystore and ${aab.name}")
+        ok
+    }
+    doFirst {
+        if (!jar.exists()) {
+            jar.parentFile.mkdirs()
+            def url = "https://github.com/cafebazaar/bundle-signer/releases/download/v${bundleSignerVersion}/bundlesigner-${bundleSignerVersion}.jar"
+            logger.lifecycle("Downloading ${url}")
+            def tmp = file("${jar}.part")
+            new URL(url).withInputStream { i -> tmp.withOutputStream { it << i } }
+            def sha = java.security.MessageDigest.getInstance('SHA-256').digest(tmp.bytes).encodeHex().toString()
+            if (!ks['bundleSigner'] && sha != bundleSignerSha256) { tmp.delete(); throw new GradleException("bundlesigner checksum mismatch: ${sha}") }
+            tmp.renameTo(jar)
+        }
+    }
+    commandLine "${System.getProperty('java.home')}/bin/java", '-jar', jar,
+        'genbin', '-v', '--bundle', aab, '--bin', aab.parentFile,
+        '--v2-signing-enabled', 'true', '--v3-signing-enabled', 'false',
+        '--ks', ks['storeFile'] ? file(ks['storeFile']) : '', '--ks-key-alias', ks['keyAlias'] ?: '',
+        '--ks-pass', 'env:BAZAAR_KS_PASS', '--key-pass', 'env:BAZAAR_KEY_PASS'
+    environment 'BAZAAR_KS_PASS', ks['storePassword'] ?: ''
+    environment 'BAZAAR_KEY_PASS', ks['keyPassword'] ?: ''
+}
+afterEvaluate { tasks.named('bundleRelease') { finalizedBy 'bazaarBin' } }
