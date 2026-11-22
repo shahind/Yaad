@@ -1,6 +1,8 @@
 import * as store from './store.js';
 import { renderMeaning, meaningText, markTerms, highlightWord, esc } from './render.js';
-import { copyText, shareText, isNative, isElectron, plugin } from './platform.js';
+import { copyText, shareText, isNative, isElectron, plugin, appLink } from './platform.js';
+
+const SHARE_LINK = appLink('com.shahinsoft.yaad', 'https://shahind.github.io/Yaad/');
 import { normalizeCompact } from './normalize.js';
 
 // ------------------------------------------------------------------ worker RPC
@@ -431,7 +433,7 @@ el.view.addEventListener('click', async (ev) => {
     await copyText(entryText(current));
     toast('معنی رونوشت شد');
   } else if (act === 'share') {
-    const text = entryText(current, 3500);
+    const text = `${entryText(current, 3500)}\n${SHARE_LINK}`;
     const r = await shareText(current.word, text);
     if (r === 'copied') toast('متن برای هم‌رسانی رونوشت شد');
   } else if (act === 'font') openSettings(true);
@@ -536,7 +538,7 @@ function showList(lid) {
     if (act === 'rename') promptSheet('تغییر نام فهرست', l.name, 'ذخیره', (n) => (store.renameList(lid, n), showList(lid)));
     if (act === 'delete') confirmSheet(`فهرست «${l.name}» حذف شود؟`, () => (store.deleteList(lid), (location.hash = '#/lists')));
     if (act === 'share') {
-      const text = `${l.name}\n\n${l.items.map((i) => '• ' + i.w).join('\n')}\n\n— یاد`;
+      const text = `${l.name}\n\n${l.items.map((i) => '• ' + i.w).join('\n')}\n\n— یاد\n${SHARE_LINK}`;
       if ((await shareText(l.name, text)) === 'copied') toast('فهرست رونوشت شد');
     }
   };

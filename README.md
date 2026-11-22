@@ -1,152 +1,82 @@
 <div align="center">
   <img src="www/icons/icon-192.png" width="96" alt="Yaad logo" />
   <h1>یاد · Yaad</h1>
-  <p><b>لغت‌نامهٔ آفلاین دهخدا</b></p>
-  <p><a href="https://shahind.github.io/Yaad/"><b>نسخه تحت وب</b></a></p>
+  <p><b>لغت‌نامهٔ دهخدا، سریع، سبک و کاملاً آفلاین</b><br/>
+  The Dehkhoda Persian dictionary: fast, lightweight and fully offline.</p>
 
   <p>
-  <a href="https://github.com/shahind/Yaad/releases"><img alt="Windows" src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white&style=for-the-badge" width="161"></a>
-  <a href="https://github.com/shahind/Yaad/releases"><img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black&style=for-the-badge" width="123"></a>
-  <a href="https://github.com/shahind/Yaad/releases"><img alt="iOS" src="https://img.shields.io/badge/iOS-000000?logo=apple&logoColor=white&style=for-the-badge" width="99"></a>
-  <a href="https://github.com/shahind/Yaad/releases"><img alt="Google Play" src="https://img.shields.io/badge/Google_Play-414141?logo=googleplay&logoColor=white&style=for-the-badge" width="194"></a>
+  <a href="https://github.com/shahind/Yaad/releases/latest"><img alt="Windows" src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white&style=for-the-badge" width="161"></a>
+  <a href="https://github.com/shahind/Yaad/releases/latest"><img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black&style=for-the-badge" width="123"></a>
+  <a href="https://github.com/shahind/Yaad/releases/latest"><img alt="iOS" src="https://img.shields.io/badge/iOS-000000?logo=apple&logoColor=white&style=for-the-badge" width="99"></a>
+  <a href="https://github.com/shahind/Yaad/releases/latest"><img alt="Google Play" src="https://img.shields.io/badge/Google_Play-414141?logo=googleplay&logoColor=white&style=for-the-badge" width="194"></a>
   <a href="https://cafebazaar.ir/app/com.shahinsoft.yaad"><img alt="Bazaar" src="https://img.shields.io/badge/Bazaar-2BAE66?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCc+PHBhdGggZD0nTTQuNSA4aDE1bC0xLjIgMTIuNUg1Ljd6JyBmaWxsPSd3aGl0ZScvPjxwYXRoIGQ9J004LjUgOFY2LjhhMy41IDMuNSAwIDAgMSA3IDBWOCcgZmlsbD0nbm9uZScgc3Ryb2tlPSd3aGl0ZScgc3Ryb2tlLXdpZHRoPScyJy8+PC9zdmc+&logoColor=white&style=for-the-badge" width="139"></a>
   </p>
-</div>
+  <p><a href="https://shahind.github.io/Yaad/"><b>▶ Open the web version</b></a></p>
 
----
+  <img src="docs/screenshots/desktop.png" alt="Yaad on desktop" width="820" />
+  <br/><br/>
+  <img src="docs/screenshots/mobile-search.png" alt="Search" width="200" />&nbsp;
+  <img src="docs/screenshots/mobile-entry.png" alt="A meaning" width="200" />&nbsp;
+  <img src="docs/screenshots/mobile-dark.png" alt="Dark theme" width="200" />
+</div>
 
 ## Download
 
-| Platform | Link |
+| Platform | |
 |---|---|
-| 🌐 Web | **[shahind.github.io/Yaad](https://shahind.github.io/Yaad/)** — installable as a PWA; Settings → «بارگیری همهٔ داده‌ها» makes it fully offline |
-| 🛍️ Bazaar | **[cafebazaar.ir/app/com.shahinsoft.yaad](https://cafebazaar.ir/app/com.shahinsoft.yaad)** |
-| 🤖 Android | **[Yaad-1.1.1.apk](https://github.com/shahind/Yaad/releases/download/v1.1.1/Yaad-1.1.1.apk)** (Android 7+) |
-| 🍏 iOS | **[Yaad-1.1.1-ios-unsigned.ipa](https://github.com/shahind/Yaad/releases/download/v1.1.1/Yaad-1.1.1-ios-unsigned.ipa)** — unsigned; sign with AltStore / Sideloadly |
-| 🪟 Windows | **[Yaad V1.1.1 x64](https://github.com/shahind/Yaad/releases/download/v1.1.1/Yaad-Setup-1.1.1.exe)** — silent install: `Yaad-Setup-1.1.1.exe /S` |
-| 🪟 Windows - portable | **[Yaad V1.1.1 x64 Portable](https://github.com/shahind/Yaad/releases/download/v1.1.1/Yaad-Portable-1.1.1.exe)** |
-| 🐧 Linux | **[AppImage](https://github.com/shahind/Yaad/releases/download/v1.1.1/Yaad-1.1.1.AppImage)** · **[.deb](https://github.com/shahind/Yaad/releases/download/v1.1.1/yaad_1.1.1_amd64.deb)** |
-
-All versions are available at [Releases Page](https://github.com/shahind/Yaad/releases).
-
-### Microsoft Store
-
-The [desktop workflow](.github/workflows/desktop.yml) also builds a Store package (`Yaad-<version>-store.appx`, MSIX)
-once the Partner Center identity is set as repository variables (`MS_STORE_IDENTITY_NAME`, `MS_STORE_PUBLISHER`,
-`MS_STORE_PUBLISHER_NAME` — from Partner Center → the app → Product identity). Upload that file in the submission;
-Microsoft signs it, so no code-signing certificate is needed.
+| Web | [shahind.github.io/Yaad](https://shahind.github.io/Yaad/), installable, works offline |
+| Android | [Cafe Bazaar](https://cafebazaar.ir/app/com.shahinsoft.yaad) or the `.apk` from [Releases](https://github.com/shahind/Yaad/releases/latest) |
+| iOS | unsigned `.ipa` from [Releases](https://github.com/shahind/Yaad/releases/latest) (install with AltStore or Sideloadly) |
+| Windows | installer or portable `.exe` from [Releases](https://github.com/shahind/Yaad/releases/latest) |
+| Linux | `.AppImage` or `.deb` from [Releases](https://github.com/shahind/Yaad/releases/latest) |
 
 ## Features
 
-- **Instant search** over all 312,507 Dehkhoda entries plus 54,008 sub-entry phrases
-  (compounds such as «به یاد آوردن» that live inside other entries).
-  Matches exact words, prefixes, word starts inside multi-word headwords and substrings,
-  regardless of spaces / ZWNJ, Arabic letter variants (ي/ك/ة…), diacritics or hamza forms.
-- **Search inside meanings**: «یاد» also finds «خاطره» (whose meaning lists «یادگار»),
-  ranked by relevance (synonym-style definitions and early mentions first).
-- **Favorites and custom lists** (create / rename / delete / share a list).
-- **Copy** a meaning, **share** a word (native share sheet on Android/iOS).
-- **Dark / light / automatic theme**, adjustable reading size, recent history, random word.
-- Desktop two-pane layout, phone single-pane layout, keyboard navigation (`/`, arrows, Enter, Esc),
-  double-click any word inside a meaning to look it up.
-- **Look-ups from other apps** (e.g. [Doost](https://github.com/shahind/Doost)): the app opens
-  `yaad://search?q=word`, the web version `https://shahind.github.io/Yaad/#/?q=word` (shows the
-  search results; `&go=1` would open the exact headword directly).
-- **100% offline**: the dictionary ships inside the app; nothing is ever downloaded at runtime.
-  The web version caches what you use (or everything, from Settings) with a service worker.
+- All **312,507 entries** of Dehkhoda, plus 54,008 phrases found inside other entries.
+- **Instant search** as you type. Spaces, half-spaces, diacritics and Arabic letter forms don't matter.
+- **Search inside meanings**: «یاد» also finds «خاطره».
+- **Favorites and your own lists**, recent words, a random word.
+- **Copy and share** meanings.
+- Light and dark themes, adjustable text size.
+- **No internet needed**, no ads, no data collected.
 
-## Performance
+---
 
-| | |
-|---|---|
-| Source SQL dumps | 255 MB |
-| Shipped data | **≈ 56 MB** (39 MB meanings, 16 MB full-text index, 1 MB headwords) |
-| Startup (index load) | ≈ 250 ms |
-| Headword search | 2 – 20 ms per keystroke |
-| Meaning search | 10 – 25 ms |
-| Memory | ≈ 30 MB of data structures; meanings are loaded in 64 KB blocks on demand (LRU cache) |
+## For developers
 
-All searching runs in a Web Worker, so typing never blocks the UI.
+### Why it is fast and light
 
-## How it works
+- The 255 MB source dictionary is packed into **56 MB** of compressed data.
+- Meanings are stored in small blocks and loaded only when shown. Persian text is re-encoded to one byte per letter before compression.
+- Headwords stay in memory as one normalized string, so a word search takes **2–20 ms**.
+- Meanings are searched through a prefix-sharded index; a query loads only the parts it needs.
+- Search runs in a Web Worker, so typing never blocks the screen. The app starts in about 250 ms.
 
-The SQL dumps in `DB/` (one per starting letter) are converted once by
-[`tools/build-data.mjs`](tools/build-data.mjs) into a compact, purpose-built format in `www/data/`:
+### Technology
 
-| File | Content |
-|---|---|
-| `words.txt` | every headword, one per line (gzip). Loaded at startup. |
-| `phrases.txt`, `phrase-parents.txt` | sub-entry phrases (♦ …؛) and the entry each belongs to. |
-| `m/<n>.txt` | meanings in ~64 KB blocks. HTML is reduced to a tiny control-character markup and text is transcoded to a **single-byte charset** (Persian letters are 2 bytes in UTF‑8) before gzip — 16 % smaller than gzip alone. |
-| `t/<n>.txt` | full-text inverted index, **sharded by token prefix** (a size-bounded trie), so a query loads only the shards it needs and can expand prefixes («یاد» → «یادگار»…). Postings are delta + varint encoded with a 4-bit relevance score (BM25 × position × synonym boost). |
-| `meta.json` | block table, shard table, charset, stop-words, build id. |
+Plain **JavaScript, HTML and CSS**, with no framework and no bundler. **Capacitor** wraps it for Android and iOS, and **Electron** for Windows and Linux. The data is built with **Node.js** scripts in `tools/`.
 
-Why not one file per letter? A word can appear anywhere: «یاد» must match «به یاد آوردن»
-(starts with «ب») and the meaning of «خاطره». So the app keeps *all* headwords in memory
-as one normalized string (a few MB — searched with native `indexOf`, which is extremely fast)
-and uses the inverted index for meanings. Only the large meaning texts are split and lazy-loaded.
+### Run, test, build
 
-Text normalization ([`www/js/normalize.js`](www/js/normalize.js)) is shared by the builder and the
-app, so both sides always agree.
-
-## Project layout
-
-```
-DB/                 Dehkhoda SQL dumps (source data)
-tools/              data builder, SQL parser, dev server, search smoke test
-www/                the app (vanilla JS, no framework, no bundler)
-  js/app.js           UI
-  js/search.worker.js search engine (Web Worker)
-  data/               generated dictionary data (git-ignored; run npm run build:data)
-electron/main.cjs   desktop shell (Windows / Linux / macOS)
-android/, ios/      Capacitor native projects
-resources/          icon & splash sources
-```
-
-## Build
-
-Requires Node.js 20+.
+Needs Node.js 20+.
 
 ```bash
 npm install
-npm run build:data      # DB/*.sql -> www/data (≈ 1 minute)
-npm test                # search smoke tests
-npm run serve           # http://localhost:5173
+npm run build:data   # build the dictionary data into www/data
+npm test             # search tests
+npm run serve        # open http://localhost:5173
 ```
 
-**Windows / Linux (Electron)**
+| Target | Command |
+|---|---|
+| Desktop app | `npm run electron` |
+| Windows build | `npm run dist:win` |
+| Linux build | `npm run dist:linux` |
+| Android | `npm run android` (opens Android Studio) |
+| iOS | `npm run ios` (opens Xcode, macOS only) |
 
-```bash
-npm run electron        # run
-npm run dist:win        # installer + portable .exe in dist/
-npm run dist:linux      # AppImage + .deb in dist/ (run on Linux)
-```
+## Credits
 
-**Android / iOS (Capacitor)**
-
-```bash
-npx cap sync            # copy www/ into the native projects
-npm run android         # open in Android Studio (or: cd android && ./gradlew assembleDebug)
-npm run ios             # open in Xcode (macOS)
-```
-
-Signed Android release: create a keystore, put `storeFile`, `storePassword`, `keyAlias` and
-`keyPassword` in a properties file **outside the repo**, then
-
-```bash
-YAAD_KEYSTORE_PROPERTIES=/path/to/keystore.properties ./gradlew assembleRelease   # in android/
-YAAD_KEYSTORE_PROPERTIES=/path/to/keystore.properties ./gradlew bundleRelease     # .aab + Cafe Bazaar .bin
-```
-
-**iOS IPA (CI)** — publishing a GitHub release runs [`.github/workflows/ios.yml`](.github/workflows/ios.yml),
-which builds an unsigned `.ipa` on macOS and attaches it to the release (it can also be started
-manually from the Actions tab with a tag).
-
-**Web (GitHub Pages)** — `npm run build:data && bash tools/deploy-pages.sh` publishes `www/`
-(including `data/`) to the `gh-pages` branch.
-
-## Credits & license
-
-- Dictionary content: *Loghatnameh-ye Dehkhoda* (لغت‌نامهٔ دهخدا), SQL format by [Nimah79](https://github.com/nimah79/Dehkhoda-SQL.git)
-- Font: [Vazirmatn](https://github.com/rastikerdar/vazirmatn) by Saber Rastikerdar — SIL Open Font License (`www/fonts/OFL.txt`).
-- Code: GNU GPL v3 — see [LICENSE](LICENSE).
+- Content: *Loghatnameh-ye Dehkhoda* (لغت‌نامهٔ دهخدا), SQL format by [Nimah79](https://github.com/nimah79/Dehkhoda-SQL).
+- Font: [Vazirmatn](https://github.com/rastikerdar/vazirmatn) (SIL Open Font License).
+- Code: [GNU GPL v3](LICENSE).

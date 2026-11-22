@@ -3,6 +3,12 @@ const cap = typeof window !== 'undefined' ? window.Capacitor : undefined;
 export const isNative = !!(cap && cap.isNativePlatform && cap.isNativePlatform());
 export const isElectron = typeof navigator !== 'undefined' && /Electron/i.test(navigator.userAgent);
 
+// Where a shared text points people: the Android app links to its Cafe Bazaar page,
+// everything else (web, iOS, desktop) to the web version.
+export function appLink(bazaarId, web) {
+  return isNative && cap.getPlatform() === 'android' ? `https://cafebazaar.ir/app/${bazaarId}` : web;
+}
+
 // Native plugin proxy (requires js/vendor/capacitor.js, the @capacitor/core runtime).
 const plugins = {};
 export function plugin(name) {

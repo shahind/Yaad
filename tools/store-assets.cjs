@@ -1,7 +1,8 @@
 // Store graphics: phone screenshots (1080×1920) and the feature graphic (1024×500), captured from
 // the real app with Electron (Chromium shapes Persian text correctly; image libraries don't).
 //   npx electron tools/store-assets.cjs store/assets.config.cjs
-// The config module exports { out, brand, scenes, feature } — see store/assets.config.cjs.
+// The config module exports { out, brand, scenes, feature } — see store/assets.config.cjs —
+// or { out, shots } for plain captures (README screenshots, see docs/screenshots.config.cjs).
 // Uses a throwaway browser profile, so the installed desktop app's data is never touched.
 const { app, BrowserWindow, nativeTheme } = require('electron');
 const http = require('node:http');
@@ -49,7 +50,7 @@ function load(win, url) {
   return done;
 }
 
-async function capture(url, { width, height, scale = SCALE, theme = 'light', storage = {}, setup = '', wait = 4000 }) {
+async function capture(url, { width, height, scale = SCALE, mobile = scale > 1, theme = 'light', storage = {}, setup = '', wait = 4000 }) {
   nativeTheme.themeSource = theme;
   // A hidden window stops producing frames after a reload, so the capture would hang: show it,
   // but far off-screen, without a taskbar entry and unable to take focus.
@@ -62,13 +63,13 @@ async function capture(url, { width, height, scale = SCALE, theme = 'light', sto
   await load(win, url);
   const dbg = win.webContents.debugger;
   dbg.attach('1.3');
-  await dbg.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile: scale > 1 });
+  await dbg.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile });
   await win.webContents.executeJavaScript(`localStorage.clear(); ${Object.entries(storage).map(([k, v]) => `localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(typeof v === 'string' ? v : JSON.stringify(v))});`).join('')}`);
   const reloaded = new Promise((r) => win.webContents.once('did-finish-load', r));
   win.webContents.reload();
   await reloaded;
   // Screenshots show the finished state: no fade-ins or transitions caught half-way.
-  await win.webContents.insertCSS('*,*::before,*::after{animation:none!important;transition:none!important}');
+  await win.webContents.insertCSS('*,*::before,*::after{animation:none!important;transition:none!important}::-webkit-scrollbar{display:none}');
   await sleep(wait);
   if (setup) {
     await win.webContents.executeJavaScript(`(async () => { ${setup} })()`);
@@ -87,6 +88,13 @@ app.whenReady().then(async () => {
   const base = await serve();
 
   fs.mkdirSync(OUT, { recursive: true });
+  if (config.shots) {
+    for (const s of config.shots) {
+      fs.writeFileSync(path.join(OUT, `${s.name}.png`), await capture(`${base}/${s.hash}`, s));
+      console.log('shot', s.name);
+    }
+    return app.quit();
+  }
   const { brand } = config;
   const fontFace = brand.fonts.map(([fam, file, w]) => `@font-face{font-family:'${fam}';src:url('/fonts/${file}') format('woff2');font-weight:${w}}`).join('');
 
