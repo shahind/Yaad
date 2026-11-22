@@ -5,13 +5,13 @@
   The Dehkhoda Persian dictionary: fast, lightweight and fully offline.</p>
 
   <p>
+  <a href="https://shahind.github.io/Yaad/"><img alt="Web" src="https://custom-icon-badges.demolab.com/badge/Web-1D68B0?logo=globe&logoColor=white&style=for-the-badge" width="104"></a>
   <a href="https://github.com/shahind/Yaad/releases/latest"><img alt="Windows" src="https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white&style=for-the-badge" width="161"></a>
   <a href="https://github.com/shahind/Yaad/releases/latest"><img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black&style=for-the-badge" width="123"></a>
   <a href="https://github.com/shahind/Yaad/releases/latest"><img alt="iOS" src="https://img.shields.io/badge/iOS-000000?logo=apple&logoColor=white&style=for-the-badge" width="99"></a>
   <a href="https://github.com/shahind/Yaad/releases/latest"><img alt="Google Play" src="https://img.shields.io/badge/Google_Play-414141?logo=googleplay&logoColor=white&style=for-the-badge" width="194"></a>
   <a href="https://cafebazaar.ir/app/com.shahinsoft.yaad"><img alt="Bazaar" src="https://img.shields.io/badge/Bazaar-2BAE66?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCc+PHBhdGggZD0nTTQuNSA4aDE1bC0xLjIgMTIuNUg1Ljd6JyBmaWxsPSd3aGl0ZScvPjxwYXRoIGQ9J004LjUgOFY2LjhhMy41IDMuNSAwIDAgMSA3IDBWOCcgZmlsbD0nbm9uZScgc3Ryb2tlPSd3aGl0ZScgc3Ryb2tlLXdpZHRoPScyJy8+PC9zdmc+&logoColor=white&style=for-the-badge" width="139"></a>
   </p>
-  <p><a href="https://shahind.github.io/Yaad/"><b>▶ Open the web version</b></a></p>
 
   <img src="docs/screenshots/desktop.png" alt="Yaad on desktop" width="820" />
   <br/><br/>
