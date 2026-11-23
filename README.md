@@ -46,11 +46,9 @@
 
 ### Why it is fast and light
 
-- The 255 MB source dictionary is packed into **56 MB** of compressed data.
-- Meanings are stored in small blocks and loaded only when shown. Persian text is re-encoded to one byte per letter before compression.
-- Headwords stay in memory as one normalized string, so a word search takes **2–20 ms**.
-- Meanings are searched through a prefix-sharded index; a query loads only the parts it needs.
-- Search runs in a Web Worker, so typing never blocks the screen. The app starts in about 250 ms.
+`tools/build-data.mjs` turns the 255 MB of source SQL into **56 MB** of app data, once, at build time. Persian letters take 2 bytes each in UTF-8, so the builder gives the 255 most frequent characters a 1-byte code each (rarer ones are escaped), and replaces the HTML markup with a few control characters. That cuts the text from 186 MB to 108 MB before compression and saves 16% after gzip. The meanings are then cut into ~64 KB gzip blocks, so the app downloads and unpacks only the block holding the entry you open. For searching inside meanings, the builder makes an **inverted index**, a list of entries for every word. Entry numbers are stored as delta-encoded varints, each with a 4-bit relevance score (BM25), and the index is split by word prefix into small files, so a query reads only the few files it needs and «یاد» can also match «یادگار».
+
+At run time all 312,000 headwords stay in memory as one normalized string (about 1 MB to download), so a word search is a native `indexOf` that takes **2–20 ms**. Normalization, shared by the builder and the app, ignores diacritics, half-spaces and Arabic letter forms. All searching runs in a **Web Worker**, so typing never blocks the screen, and the app starts in about 250 ms.
 
 ### Technology
 
