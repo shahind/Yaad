@@ -73,6 +73,41 @@ npm run serve        # open http://localhost:5173
 | Android | `npm run android` (opens Android Studio) |
 | iOS | `npm run ios` (opens Xcode, macOS only) |
 
+### Open a word in Yaad from your app
+
+Any app can show Yaad's meaning for a word, as [Doost](https://github.com/shahind/Doost) does. Open the Yaad app if it is installed, otherwise the web version:
+
+| | Link |
+|---|---|
+| Yaad app (Android, iOS) | `yaad://search?q=<word>` |
+| Web version (any platform) | `https://shahind.github.io/Yaad/#/?q=<word>` |
+
+Encode the word with `encodeURIComponent` (or your platform's equivalent). Both links show the search results for the word. On the web, adding `&go=1` opens the exact entry instead.
+
+**Android**: declare Yaad's package so your app can check for it (Android 11+), then open the link:
+
+```xml
+<!-- AndroidManifest.xml -->
+<queries><package android:name="com.shahinsoft.yaad" /></queries>
+```
+
+```kotlin
+val word = Uri.encode("یاد")
+val installed = runCatching { packageManager.getPackageInfo("com.shahinsoft.yaad", 0) }.isSuccess
+val link = if (installed) "yaad://search?q=$word" else "https://shahind.github.io/Yaad/#/?q=$word"
+startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link)))
+```
+
+**iOS**: add `yaad` to `LSApplicationQueriesSchemes` in `Info.plist`, then:
+
+```swift
+let word = "یاد".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!
+let app = URL(string: "yaad://search?q=\(word)")!
+UIApplication.shared.open(UIApplication.shared.canOpenURL(app) ? app : URL(string: "https://shahind.github.io/Yaad/#/?q=\(word)")!)
+```
+
+**Web and desktop**: open the web link, for example `window.open('https://shahind.github.io/Yaad/#/?q=' + encodeURIComponent(word))`.
+
 ## Credits
 
 - Content: *Loghatnameh-ye Dehkhoda* (لغت‌نامهٔ دهخدا), SQL format by [Nimah79](https://github.com/nimah79/Dehkhoda-SQL).
