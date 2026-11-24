@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { BrowserWorker } from './worker-shim.mjs';
 import { normalizeQuoted } from '../www/js/normalize.js';
+import { markMatch, highlightWord } from '../www/js/render.js';
+import { plainMeaning, compactMeaning } from '../www/js/search-match-text.js';
 import { readEntryTags, tagFilterMasks, matchesEntryTags } from '../www/js/search-origin-grammar.js';
 import { buildWordQuery } from '../www/js/search-syntax.js';
 
@@ -92,6 +94,33 @@ const mm = await call('meanings', { q: 'خورشید', exclude: [] });
 check('«خورشید» meaning search returns results', mm.results.length > 10);
 const regexMeanings = await call('meanings', { q: '/خورشید/', exclude: [] });
 check('regex searches indexed meaning words', regexMeanings.results.length > 0 && regexMeanings.results.every((r) => r.terms?.some((term) => term.includes('خورشید'))));
+
+const phraseMeaning = await call('meanings', { q: 'headword:/^ابه$/u AND meaning:/یاد آوردن/u', exclude: [] });
+check('meaning regex finds a spaced phrase in the real dictionary', phraseMeaning.results.some((row) => row.w === 'ابه' && row.snippet?.text.includes('یاد آوردن')));
+const absentMeaning = await call('meanings', { q: 'headword:/^آفتاب$/u AND meaning:/^(?!.*خورشید).*$/u', exclude: [] });
+const absentEntries = await Promise.all(absentMeaning.results.map((row) => call('entry', { id: row.id })));
+check('meaning exclusions reject real entries containing the forbidden word', absentEntries.length > 0 && absentEntries.every((entry) => !entry.body.includes('خورشید')));
+const commonMeaning = await call('meanings', { q: 'headword:/^آب$/u AND meaning:/^آب$/u', exclude: [] });
+check('real meaning search can find a complete common word omitted from the index', commonMeaning.results.some((row) => row.w === 'آب' && row.snippet?.text.includes('آب')));
+const literalMeaning = await call('meanings', { q: '/^آوردن$/u', exclude: [] });
+const escapedMeaning = await call('meanings', { q: '/^\\u0622وردن$/u', exclude: [] });
+check('real literal and escaped Persian regexes agree', literalMeaning.results.length > 0 && isDeepStrictEqual(escapedMeaning.results, literalMeaning.results));
+
+const highlightQuery = 'headword:/^ابه$/u AND meaning:/یاد آوردن/u AND meaning:/فراموش/u';
+const phraseRow = phraseMeaning.results.find((row) => row.w === 'ابه');
+const allHighlights = (await call('snippets', { q: highlightQuery, requests: [{ id: phraseRow.id, key: 'all-highlights', kind: 'm' }] }))[0];
+const highlightHTML = markMatch(allHighlights.text, allHighlights.matches);
+check('real snippets highlight both phrase and additional search word', highlightHTML.includes('<mark>یاد آوردن</mark>') && highlightHTML.includes('<mark>فراموش</mark>'));
+const highlightLoads = dataLoads;
+const entryHighlights = await call('highlights', { q: highlightQuery, id: phraseRow.id });
+const highlightedEntry = await call('entry', { id: phraseRow.id });
+const entryText = compactMeaning(plainMeaning(highlightedEntry.body));
+check('opened entries highlight both repeated real search terms', isDeepStrictEqual(entryHighlights.matches.map(({ start, end }) => entryText.slice(start, end)), ['یادآوردن', 'فراموش', 'یادآوردن', 'فراموش']));
+check('extra entry highlights require no additional dictionary files after the snippet', dataLoads === highlightLoads);
+const titleQuery = 'headword:/خورشید/u AND headword:/ماه/u';
+const titleMatch = (await call('search', { q: titleQuery })).head.find((row) => row.w === 'تیره شدن خورشید و ماه');
+const titleHighlights = (await call('snippets', { q: titleQuery, requests: [{ id: titleMatch.id, word: titleMatch.w, key: 'title-highlights', kind: 'h' }] }))[0];
+check('real compound titles highlight both words', highlightWord(titleMatch.w, '', titleHighlights.headMatches) === 'تیره شدن <b>خورشید</b> و <b>ماه</b>');
 
 // Exercise the builder and worker against shipped data, not just fixtures. An
 // older generated dictionary can pass ordinary searches but reject mixed fields.

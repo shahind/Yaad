@@ -8,7 +8,7 @@ export const plainMeaning = (body) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-export function regexSnippet(text, pron, match) {
+export function regexSnippet(text, pron, match, bounds = false) {
   let from = Math.max(0, match.start - 40);
   if (from) {
     const space = text.indexOf(' ', from);
@@ -20,7 +20,38 @@ export function regexSnippet(text, pron, match) {
     pron,
     text: prefix + text.slice(from, to) + (to < text.length ? ' …' : ''),
     match: { start: prefix.length + match.start - from, end: prefix.length + Math.min(match.end, to) - from },
+    ...(bounds ? { bounds: { from, to, prefix: prefix.length } } : {}),
   };
+}
+
+export function mergeMatches(matches, length = Infinity) {
+  const sorted = (matches || []).filter((match) => match && Number.isFinite(match.start) && Number.isFinite(match.end))
+    .map(({ start, end }) => ({ start: Math.max(0, start), end: Math.min(length, end) }))
+    .filter(({ start, end }) => end > start).sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged = [];
+  for (const match of sorted) {
+    const last = merged.at(-1);
+    if (last && match.start <= last.end) last.end = Math.max(last.end, match.end);
+    else merged.push({ ...match });
+  }
+  return merged;
+}
+
+// Coordinates after removing rendering whitespace and sense/compound symbols.
+export const compactMeaning = (text) => text.replace(/[\s◄♦]/g, '');
+
+export function compactMatches(body, parts, matches) {
+  const offsets = new Map();
+  return mergeMatches(matches.map(({ part, match }) => {
+    if (!offsets.has(part)) {
+      const text = parts[part].text;
+      const positions = new Uint32Array(text.length + 1);
+      for (let i = 0; i < text.length; i++) positions[i + 1] = positions[i] + (compactMeaning(text[i]) ? 1 : 0);
+      offsets.set(part, { positions, base: compactMeaning(plainMeaning(body.slice(0, parts[part].range?.[0] || 0))).length });
+    }
+    const { positions, base } = offsets.get(part);
+    return { start: base + positions[match.start], end: base + positions[match.end] };
+  }));
 }
 
 // Locate a literal match in rendered text fragments without executing user regexes

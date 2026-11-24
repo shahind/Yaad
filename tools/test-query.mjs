@@ -4,8 +4,9 @@ import { isDeepStrictEqual } from 'node:util';
 import { BrowserWorker } from './worker-shim.mjs';
 import { parseSearchQuery, buildSearchQuery, buildCombinedQuery, buildTaggedQuery, buildWordQuery, buildScopedQuery, separateSearchFilters, readSearchBuilder, isTaggedPattern, escapeRegex, quotedIndexTerms, readHeadwordRegex, readMeaningRegex, SEARCH_FILTER_TAGS } from '../www/js/search-syntax.js';
 import { normalizeCompact, normalizeQuoted, quotedMatch, tokenize, termTester } from '../www/js/normalize.js';
-import { highlightWord, markMatch } from '../www/js/render.js';
-import { plainMeaning, regexSnippet, literalRange } from '../www/js/search-match-text.js';
+import { highlightWord, markMatch, markRanges } from '../www/js/render.js';
+import { plainMeaning, regexSnippet, literalRange, compactMeaning, compactMatches } from '../www/js/search-match-text.js';
+import { normalizeMeaningPattern, meaningPatternMatcher } from '../www/js/search-meaning-pattern.js';
 import { ENTRY_TAGS, readEntryTags, entryTagText, tagFilterMasks, matchesEntryTags, TAG_VERSION } from '../www/js/search-origin-grammar.js';
 import { SENSE_VERSION, SENSE_TAGS, readOpeningTags, splitSenses, planSenseFilters, senseTagText, normalizeSenseFilters } from '../www/js/search-subject-usage.js';
 import { SOURCE_VERSION, SOURCE_TAGS, readSources, sourceOwners, decodeSourceOwners } from '../www/js/search-citations.js';
@@ -356,6 +357,45 @@ const combinedRegex = (groups, match = 'any', filters = {}, flags = 'u') => {
   check('literal ranges select the matched occurrence', isDeepStrictEqual(literalRange(['آب و ', 'آب'], 'آب', 'آب و '), {
     start: { part: 1, offset: 0 }, end: { part: 1, offset: 2 },
   }));
+}
+
+// Multiple highlights merge overlaps and retain their positions across formatting.
+{
+  check('multiple title matches highlight both requested words', highlightWord('خورشید و ماه', '', [{ start: 0, end: 6 }, { start: 9, end: 12 }]) === '<b>خورشید</b> و <b>ماه</b>');
+  check('multiple snippet spans merge overlaps and escape HTML', markMatch('<خورشید> و ماه', [{ start: 2, end: 5 }, { start: 1, end: 7 }, { start: 11, end: 14 }]) === '&lt;<mark>خورشید</mark>&gt; و <mark>ماه</mark>');
+  check('invalid and empty match spans add no markup', markMatch('<x>', [{ start: 2, end: 1 }, { start: 0, end: 0 }]) === '&lt;x&gt;');
+  const oldDocument = globalThis.document, oldFilter = globalThis.NodeFilter;
+  class Node {
+    constructor(tag, text = '') { this.tag = tag; this.nodeValue = text; this.children = []; }
+    get textContent() { return this.tag === '#text' ? this.nodeValue : this.children.map((node) => node.textContent).join(''); }
+    set textContent(text) { this.children = []; this.append(text); }
+    append(...items) { for (const item of items) { const node = typeof item === 'string' ? new Node('#text', item) : item; node.parent = this; this.children.push(node); } }
+    replaceWith(fragment) {
+      const index = this.parent.children.indexOf(this);
+      for (const node of fragment.children) node.parent = this.parent;
+      this.parent.children.splice(index, 1, ...fragment.children);
+    }
+  }
+  const textNodes = (node) => node.tag === '#text' ? [node] : node.children.flatMap(textNodes);
+  globalThis.NodeFilter = { SHOW_TEXT: 4 };
+  globalThis.document = {
+    createTreeWalker(root) { const nodes = textNodes(root); let i = 0; return { currentNode: null, nextNode() { this.currentNode = nodes[i++]; return !!this.currentNode; } }; },
+    createElement: (tag) => new Node(tag), createDocumentFragment: () => new Node('#fragment'),
+  };
+  try {
+    const root = new Node('div'), bold = new Node('b'), next = new Node('p');
+    bold.append(' آوردن'); next.append('یاد آوردن');
+    root.append('(اِ) یاد', bold, ' و فراموش ', next);
+    const body = '(اِ) یاد\x05 آوردن\x06 و فراموش\x01یاد آوردن';
+    const text = plainMeaning(body);
+    const hits = [...text.matchAll(/یاد آوردن|فراموش/g)].map((match) => ({ part: 0, match: { start: match.index, end: match.index + match[0].length } }));
+    const marks = markRanges(root, compactMatches(body, [{ text }], hits));
+    check('entry highlights cover every match across formatted nodes and sense boundaries', isDeepStrictEqual(marks.map((node) => node.textContent.trim()), ['یاد', 'آوردن', 'فراموش', 'یاد آوردن']));
+    check('entry highlighting preserves the original rendered text', root.textContent === '(اِ) یاد آوردن و فراموش یاد آوردن');
+  } finally {
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldFilter === undefined) delete globalThis.NodeFilter; else globalThis.NodeFilter = oldFilter;
+  }
 }
 
 // Opening Dehkhoda labels distinguish origins and kinds of words.
@@ -1012,8 +1052,8 @@ await call('init');
   check('regex progress describes index shards', updates.every((update) => update.stage === 'index'));
   check('regex progress matches the final results', updates.at(-1).matched === result.results.length);
   check('regex lookup does not verify every definition', !fetched.slice(before).some((file) => file.startsWith('m/')));
-  check('cross-word regex does not silently scan definitions', (await call('meanings', { q: '/یاد آوردن/', exclude: [] })).results.length === 0);
-  check('labels omitted from the token index are not regex words', (await call('meanings', { q: '/\\(ع اِ\\)/', exclude: [] })).results.length === 0);
+  check('cross-word regex checks the displayed definition', (await call('meanings', { q: '/یاد آوردن/', exclude: [] })).results.some((row) => row.w === 'خاطره'));
+  check('regex can find visible labels omitted from the token index', (await call('meanings', { q: '/\\(ع اِ\\)/', exclude: [] })).results.some((row) => row.w === 'کتاب'));
 }
 
 // Metadata is applied to posting entry ids, including combined helper rules.
@@ -1835,6 +1875,178 @@ await call('init');
     globalThis.fetch = realFetch;
     files.clear();
     for (const [name, value] of backup) files.set(name, value);
+  }
+}
+
+// Meaning rules share scope semantics, verify absence across the selected text,
+// and fall back to displayed definitions for phrases and unindexed characters.
+{
+  const backup = new Map(files);
+  const realWorker = globalThis.Worker;
+  const bodies = [
+    '(اِ) خورشید و ماه.\x01(اِ) روشنی روز.',
+    '(اِ) یادِ آوردن و یادآوردن.',
+    '(اِ) آب را از چاه بکش.',
+    '(اِ) تنها ماه.',
+    '(اِ) Book AA.',
+    '(اِ) book aa.',
+    '(اِ) ' + 'توضیح '.repeat(510) + 'یاد آوردن و خورشید.',
+    '(اِ) (اصطلاح طب) یاد آوردن\x01(اصطلاح منطق) خورشید',
+    '(اِ) واژه مادر\x04\x05ترکیب خاص\x06 ؛ (اِ) یاد آوردن و خورشید.',
+  ];
+  try {
+    files.clear();
+    for (const [name, bytes] of fixture({ words: ['آفتاب', 'ذکر', 'چاه', 'شب', 'لاتین بزرگ', 'لاتین کوچک', 'بلند', 'دو معنی', 'مادر'], bodies,
+      phrases: ['ترکیب خاص'], phraseParents: [8], phraseBodies: ['(اِ) یاد آوردن و خورشید.'],
+      stopwords: ['و', 'را', 'از', 'اب'], completeCompounds: true })) files.set(name, bytes);
+    await import('../www/js/search.worker.js?meaning-regressions');
+    await call('init');
+    const meanings = async (q, options = {}) => (await call('meanings', { q, exclude: [], ...options })).results;
+    const ids = (rows) => rows.map((row) => row.id).sort((a, b) => a - b);
+    const rules = [{ match: 'all', rules: [{ kind: 'contains', value: 'خورشید' }, { kind: 'contains', value: 'ماه' }] }];
+    const both = await meanings(buildWordQuery(rules));
+    const meaningOnly = await meanings(buildWordQuery([{ ...rules[0], rules: rules[0].rules.map((rule) => ({ ...rule, scope: 'meaning' })) }]));
+    check('default AND scope retains every meaning-only AND match', both.length > 0 && meaningOnly.every((row) => both.some((found) => found.id === row.id)));
+    const mixed = buildWordQuery([{ match: 'all', rules: [{ kind: 'whole', value: 'آفتاب' }, { kind: 'contains', value: 'ماه' }] }]);
+    check('default AND can combine evidence from the title and its meaning', isDeepStrictEqual(ids(await meanings(mixed)), [0]));
+    const excluded = buildWordQuery([{ match: 'all', rules: [{ scope: 'headword', kind: 'whole', value: 'آفتاب' }, { scope: 'meaning', kind: 'excludes', value: 'خورشید' }] }]);
+    check('without text rejects an entry even when another sense lacks the text', (await meanings(excluded)).length === 0);
+    check('custom negative assertions also reject forbidden text in another sense', (await meanings('headword:/^آفتاب$/u AND meaning:/^(?!.*(?:خورشید|ستاره)).*$/u')).length === 0);
+    const negative = '/^(?!.*خورشید).*$/u';
+    const absent = await meanings(negative);
+    check('negative meaning regex rejects every entry containing the forbidden text, including late mentions', !absent.some((row) => [0, 6, 7, 8].includes(row.id)) && absent.some((row) => row.id === 3));
+    check('negative meaning matches do not highlight an unrelated indexed word', absent.every((row) => !row.terms && row.match.start === row.match.end));
+    const phrase = await meanings('/یاد آوردن/u');
+    check('phrase regex finds spaced text, folded diacritics and text beyond the index budget', isDeepStrictEqual(ids(phrase), [1, 6, 7, 8]));
+    const first = phrase.find((row) => row.id === 1);
+    check('phrase snippets preserve the original diacritics and exact match offsets', first.snippet.text.slice(first.snippet.match.start, first.snippet.match.end) === 'یادِ آوردن');
+    check('wildcard regex spans separate words', (await meanings('/یاد.*آوردن/u')).some((row) => row.id === 6));
+    check('anchored phrases match complete words inside a definition', (await meanings('/^یاد آوردن$/u')).some((row) => row.id === 1));
+    check('complete common words omitted from the index remain searchable', isDeepStrictEqual(ids(await meanings('/^آب$/u')), [2]));
+    check('single-letter meaning words remain searchable', (await meanings('/^و$/u')).some((row) => row.id === 0));
+    const literal = await meanings('/^آوردن$/u');
+    check('escaped Unicode and literal Persian patterns produce identical results', isDeepStrictEqual(await meanings('/^\\u0622وردن$/u'), literal));
+    check('code-point escapes use the same Persian folding', isDeepStrictEqual(await meanings('/^\\u{622}وردن$/u'), literal));
+    check('Latin uppercase regex matches the displayed uppercase word', isDeepStrictEqual(ids(await meanings('/^Book$/u')), [4]));
+    check('Latin lowercase regex preserves case sensitivity', isDeepStrictEqual(ids(await meanings('/^book$/u')), [5]));
+    check('case-insensitive meaning regex matches both displayed variants', isDeepStrictEqual(ids(await meanings('/^book$/iu')), [4, 5]));
+    check('uppercase character classes can find displayed uppercase letters', isDeepStrictEqual(ids(await meanings('/^[A-Z]{2}$/u')), [4]));
+    check('meaning phrases honor selected subject ranges', isDeepStrictEqual(ids(await meanings('/یاد آوردن/u', { filters: { 'subject-medicine': 1 } })), [7]));
+    check('meaning exclusions apply only to selected subject ranges', (await meanings(negative, { filters: { 'subject-medicine': 1 } })).some((row) => row.id === 7));
+    const compound = await meanings('headword:/^ترکیب خاص$/u AND meaning:/یاد آوردن/u');
+    check('phrase scans retain compound ownership and matching ranges', compound.length === 1 && compound[0].phrase && compound[0].range && compound[0].snippet.text.includes('یاد آوردن'));
+    check('compound phrases cannot satisfy their parent title', (await meanings('headword:/^مادر$/u AND meaning:/یاد آوردن/u')).length === 0);
+    check('compound negative rules reject forbidden text within that compound', (await meanings('headword:/^ترکیب خاص$/u AND meaning:/^(?!.*خورشید).*$/u')).length === 0);
+    const progress = [];
+    await call('meanings', { q: '/یاد آوردن/u', exclude: [], progress: true }, (update) => progress.push(update));
+    check('definition scans stream matching rows and accurate completion counts', progress.some((update) => update.results.length) && progress.at(-1).scanned === progress.at(-1).total && progress.at(-1).matched === phrase.length);
+    await import('../www/js/search.worker.js?cancel-definition-regression');
+    await call('init');
+    let entered;
+    const started = new Promise((resolve) => { entered = resolve; });
+    globalThis.Worker = class extends BrowserWorker {
+      postMessage(data) { if (data.definitions) entered(); else super.postMessage(data); }
+    };
+    const pending = meanings('/یاد آوردن/u');
+    const cancelled = rejects(pending, /لغو/);
+    await started;
+    check('entry navigation stays available during definition matching', (await call('entry', { id: 0 })).word === 'آفتاب');
+    await call('search', { q: 'شب' });
+    check('new queries cancel a stalled definition matcher', await cancelled);
+  } finally {
+    globalThis.Worker = realWorker;
+    files.clear();
+    for (const [name, bytes] of backup) files.set(name, bytes);
+  }
+  const range = new RegExp(normalizeMeaningPattern('[آ-ئ]'), 'u');
+  check('folded character ranges retain their original set rather than expanding endpoints', range.test('ا') && range.test('ی') && !range.test('ک'));
+  check('escaped punctuation remains literal after pattern folding', new RegExp(normalizeMeaningPattern('\\u002e'), 'u').test('.') && !new RegExp(normalizeMeaningPattern('\\u002e'), 'u').test('x'));
+  const named = normalizeMeaningPattern('(?<آب>آب)\\k<آب>');
+  check('normalization preserves named capture identifiers and backreferences', new RegExp(named, 'u').test('اباب'));
+  const length = meaningPatternMatcher(readMeaningRegex(parseSearchQuery('/^.{4}$/u')));
+  check('length helpers count a word rather than a span across short words', length([{ text: 'تو با من' }]) === null && !!length([{ text: 'یک کتاب خوب' }]));
+}
+
+// Highlight details are collected lazily for requested rows and opened entries.
+{
+  const backup = new Map(files), realWorker = globalThis.Worker;
+  const words = ['آفتاب', 'یادآوری', 'بدل', 'شب', 'دو معنی', 'مادر', 'تکرار', 'حساس'];
+  const bodies = [
+    '(اِ) خورشید و ماه. خورشید و ماه.',
+    '(اِ) یادِ آوردن و فراموش کردن؛ یاد آوردن و فراموش کردن.',
+    '(اِ) خورشید و ماه و دنباله.', '(اِ) همان.',
+    '(اِ) (اصطلاح طب) خورشید\x01(اصطلاح منطق) ماه',
+    '(اِ) خورشید مادر (برهان)\x04\x05خورشید و ماه\x06 ؛ (اِ) یاد آوردن و فراموش کردن. (آنندراج)',
+    '(اِ) ' + 'خورشید '.repeat(250) + 'ماه.', '(اِ) Book book AA aa.',
+  ];
+  try {
+    files.clear();
+    for (const [name, bytes] of fixture({ words, bodies, phrases: ['خورشید و ماه'], phraseParents: [5],
+      phraseBodies: ['(اِ) یاد آوردن و فراموش کردن. (آنندراج)'], stopwords: ['و'], completeCompounds: true })) files.set(name, bytes);
+    await import('../www/js/search.worker.js?lazy-highlights');
+    await call('init');
+    const query = 'headword:/^آفتاب$/u AND meaning:/خورشید/u AND meaning:/ماه/u';
+    const before = await call('meanings', { q: query, exclude: [] });
+    const loaded = fetched.length;
+    const display = await call('snippets', { q: query, requests: [{ key: 'sun', id: 0, kind: 'm' }] });
+    check('visible snippets highlight all searched terms and repetitions', isDeepStrictEqual(display[0].matches.map(({ start, end }) => display[0].text.slice(start, end)), ['خورشید', 'ماه', 'خورشید', 'ماه']));
+    check('visible highlight requests load only the requested definition', fetched.slice(loaded).filter((name) => name.startsWith('m/')).every((name) => name === 'm/0.txt') && !fetched.slice(loaded).some((name) => /^[stu]\//.test(name)));
+    const names = (id, result) => { const text = compactMeaning(plainMeaning(bodies[id])); return result.matches.map(({ start, end }) => text.slice(start, end)); };
+    const full = await call('highlights', { id: 0, q: query });
+    check('opened entries retain all positive query highlights', isDeepStrictEqual(names(0, full), ['خورشید', 'ماه', 'خورشید', 'ماه']));
+    check('extra highlights do not change cached search results', isDeepStrictEqual((await call('meanings', { q: query, exclude: [] })).results, before.results));
+    const phraseQuery = 'headword:/^یادآوری$/u AND meaning:/یاد آوردن/u AND meaning:/فراموش/u';
+    const phrase = await call('highlights', { id: 1, q: phraseQuery });
+    check('opened entries combine phrase and indexed term highlights', isDeepStrictEqual(names(1, phrase), ['یادِآوردن', 'فراموش', 'یادآوردن', 'فراموش']));
+    const phraseSnippet = (await call('snippets', { q: phraseQuery, requests: [{ id: 1, key: 'phrase', kind: 'm' }] }))[0];
+    check('phrase snippets retain original diacritics and additional words', markMatch(phraseSnippet.text, phraseSnippet.matches).includes('<mark>یادِ آوردن</mark>') && markMatch(phraseSnippet.text, phraseSnippet.matches).includes('<mark>فراموش</mark>'));
+    const alternative = await call('highlights', { id: 1, q: 'meaning:/(?:یاد|فراموش)/u' });
+    check('regex alternatives highlight every visible occurrence', isDeepStrictEqual(names(1, alternative), ['یادِ', 'فراموش', 'یاد', 'فراموش']));
+    const headQuery = 'headword:/خورشید/u AND headword:/ماه/u';
+    const title = (await call('snippets', { q: headQuery, requests: [{ id: 5, word: 'خورشید و ماه', key: 'title', kind: 'h' }] }))[0];
+    check('compound result titles retain multiple independent match spans', highlightWord('خورشید و ماه', '', title.headMatches) === '<b>خورشید</b> و <b>ماه</b>');
+    const branch = await call('highlights', { id: 2, q: '(meaning:/خورشید/u AND meaning:/نیافته/u) OR meaning:/ماه/u' });
+    check('failed OR branches do not contribute stray highlights', isDeepStrictEqual(names(2, branch), ['ماه']));
+    const headBranch = (await call('snippets', { q: '(headword:/خورشید/u AND headword:/نیافته/u) OR headword:/ماه/u', requests: [{ id: 5, word: 'خورشید و ماه', key: 'head-or', kind: 'h' }] }))[0];
+    check('failed headword branches do not highlight their partial matches', highlightWord('خورشید و ماه', '', headBranch.headMatches) === 'خورشید و <b>ماه</b>');
+    const negative = await call('highlights', { id: 3, q: 'meaning:/^(?!.*خورشید).*$/u' });
+    check('absence conditions add no positive highlights', negative.matches.length === 0);
+    const across = await call('highlights', { id: 4, q: 'meaning:/خورشید/u AND meaning:/ماه/u' });
+    check('query terms in separate senses are both highlighted', isDeepStrictEqual(names(4, across), ['خورشید', 'ماه']));
+    const medical = await call('highlights', { id: 4, q: 'meaning:/خورشید/u OR meaning:/ماه/u', filters: { 'subject-medicine': 1 } });
+    check('entry highlighting respects the selected subject sense', isDeepStrictEqual(names(4, medical), ['خورشید']));
+    const child = await call('highlights', { id: 5, word: 'خورشید و ماه', q: 'headword:/^خورشید و ماه$/u AND meaning:/یاد آوردن/u AND meaning:/فراموش/u' });
+    check('compound entry highlights stay within that compound', isDeepStrictEqual(names(5, child), ['یادآوردن', 'فراموش']));
+    const parent = await call('highlights', { id: 5, q: 'meaning:/خورشید/u OR meaning:/فراموش/u' });
+    check('parent highlighting does not include child-only meaning matches', isDeepStrictEqual(names(5, parent), ['خورشید']));
+    const cited = await call('highlights', { id: 5, q: 'meaning:/خورشید/u OR meaning:/فراموش/u', filters: { 'source-burhan': 1 } });
+    check('entry highlights respect source ownership', isDeepStrictEqual(names(5, cited), ['خورشید']));
+    const limits = await call('highlights', { id: 6, q: 'meaning:/خورشید/u AND meaning:/ماه/u' });
+    check('highlight budgets retain a later term even after many earlier matches', limits.matches.length <= 200 && names(6, limits).includes('ماه'));
+    const limitedSnippet = (await call('snippets', { q: 'meaning:/خورشید/u OR meaning:/ماه/u', requests: [{ id: 6, key: 'limited', kind: 'm' }] }))[0];
+    check('snippet highlight collection stays inside its preview', limitedSnippet.matches.length <= 64 && limitedSnippet.matches.every(({ start, end }) => start >= 0 && end <= limitedSnippet.text.length));
+    const upper = await call('highlights', { id: 7, q: 'meaning:/Book/u OR meaning:/AA/u' });
+    check('extra highlight matches preserve case-sensitive regex flags', isDeepStrictEqual(names(7, upper), ['Book', 'AA']));
+    const zero = await call('highlights', { id: 0, q: 'meaning:/(?=خورشید)/u OR meaning:/ماه/u' });
+    check('zero-width alternatives finish without inserting empty marks', isDeepStrictEqual(names(0, zero), ['ماه', 'ماه']));
+    const overlap = await call('highlights', { id: 1, q: 'meaning:/یاد/u OR meaning:/یاد آوردن/u' });
+    check('overlapping term and phrase highlights merge cleanly', isDeepStrictEqual(names(1, overlap), ['یادِآوردن', 'یادآوردن']));
+    const pendingKey = 'display-cancel';
+    let entered;
+    const started = new Promise((resolve) => { entered = resolve; });
+    globalThis.Worker = class extends BrowserWorker {
+      postMessage(data) { if (data.highlight) entered(); else super.postMessage(data); }
+    };
+    const delayed = call('snippets', { q: query, requests: [{ id: 0, key: pendingKey, kind: 'm' }] });
+    const cancelled = rejects(delayed, /لغو/);
+    await started;
+    check('entry navigation remains responsive during extra highlighting', (await call('entry', { id: 3 })).word === 'شب');
+    await call('search', { q: 'شب' });
+    check('typing a new query cancels outdated highlight work', await cancelled);
+  } finally {
+    globalThis.Worker = realWorker;
+    files.clear();
+    for (const [name, bytes] of backup) files.set(name, bytes);
   }
 }
 

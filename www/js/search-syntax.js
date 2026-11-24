@@ -2,7 +2,8 @@
 import { ENTRY_TAGS } from './search-origin-grammar.js';
 import { SENSE_TAGS, normalizeSenseFilters } from './search-subject-usage.js';
 import { SOURCE_TAGS } from './search-citations.js';
-import { normalizeSpaced, normalizeQuoted, NORM_TABLE } from './normalize.js';
+import { normalizeSpaced, normalizeQuoted } from './normalize.js';
+import { normalizeMeaningPattern } from './search-meaning-pattern.js';
 
 const QUOTES = new Map([['"', '"'], ['“', '”'], ['«', '»']]);
 const MAX_PATTERN_LENGTH = 500;
@@ -301,7 +302,8 @@ export function buildWordQuery(groups, match = 'any', flags = 'u', original = ''
   if (!Object.keys(current.filters).length && JSON.stringify([activeGroups(groups), match, flags]) === JSON.stringify([activeGroups(current.groups), current.match, originalFlags])) return original;
   const active = groups.some((group) => group.rules.some(activeRule));
   if (!active) return '';
-  return groups.some((group) => group.rules.some((rule) => activeRule(rule) && rule.scope && rule.scope !== 'both'))
+  return groups.flatMap((group) => group.rules.filter(activeRule)).length > 1
+    || groups.some((group) => group.rules.some((rule) => activeRule(rule) && rule.scope && rule.scope !== 'both'))
     ? buildScopedQuery(groups, match, flags) : buildCombinedQuery(groups, match, {}, flags);
 }
 
@@ -498,19 +500,13 @@ export function readMeaningRegex(query) {
   if (isTaggedPattern(wordQuery.source)) return null;
   // Fold literal Persian/Arabic letters and digits to the same indexed form.
   // ASCII regex syntax, case flags and explicit escapes retain their meaning.
-  let source = '';
-  for (let i = 0; i < wordQuery.source.length; i++) {
-    const char = wordQuery.source[i];
-    if (char === '\\') { source += char + (wordQuery.source[++i] || ''); continue; }
-    const code = char.charCodeAt(0);
-    const folded = code === 0x200c ? 0 : NORM_TABLE[code];
-    source += code < 128 || folded === 32 ? char : folded ? String.fromCharCode(folded) : '';
-  }
+  const source = normalizeMeaningPattern(wordQuery.source);
   try {
     new RegExp(source || '(?!)', wordQuery.flags);
   } catch {
     return null;
   }
+  const normalizedBuilder = readWordRules({ ...wordQuery, source: source || '(?!)' });
   const combine = (parts, match) => {
     if (match === 'any') return parts.some((part) => part === null) ? null : [...new Set(parts.flat())];
     const known = parts.filter((part) => part !== null);
@@ -527,7 +523,19 @@ export function readMeaningRegex(query) {
   return {
     query: { ...wordQuery, source: source || '(?!)' },
     filters: builder.filters,
+    match: normalizedBuilder.match,
+    groups: normalizedBuilder.groups.map((group) => ({ match: group.match, rules: group.rules.map((rule) => {
+      const negative = ['excludes', 'not-starts', 'not-ends'].includes(rule.kind);
+      const kind = negative ? { excludes: 'contains', 'not-starts': 'starts', 'not-ends': 'ends' }[rule.kind] : rule.kind;
+      let query;
+      try { query = parseSearchQuery(buildSearchQuery(kind, rule.value, {}, wordQuery.flags)); }
+      catch { query = { source, flags: wordQuery.flags }; }
+      return { source: normalizeMeaningPattern(query.source), flags: query.flags, negative,
+        wholeText: rule.kind === 'regex' && /\(\?(?:!|<!)/.test(rule.value),
+        wordOnly: ['letters', 'length', 'min-length', 'max-length', 'length-range', 'wildcard'].includes(rule.kind) && !/\s/.test(rule.value),
+        kind: rule.kind, value: normalizeQuoted(rule.value) };
+    }) })),
     prefixes: query.flags.includes('i') ? null
-      : combine(builder.groups.map((group) => combine(group.rules.map(prefix), group.match)), builder.match)?.map((value) => normalizeQuoted(value)) || null,
+      : combine(normalizedBuilder.groups.map((group) => combine(group.rules.map(prefix), group.match)), normalizedBuilder.match)?.map((value) => normalizeQuoted(value)) || null,
   };
 }

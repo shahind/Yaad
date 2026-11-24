@@ -1,9 +1,72 @@
 // Run regex searches in a disposable worker so slow patterns can be terminated.
 // The search worker keeps dictionary data and other queries available.
 import { entryTagText, matchesEntryTags } from './search-origin-grammar.js';
+import { meaningPatternMatcher } from './search-meaning-pattern.js';
+import { regexSnippet, mergeMatches } from './search-match-text.js';
 
-self.onmessage = ({ data: { words, phrases, tokens, source, flags, limit, tags, masks, facets, sources, conditions, metadata = !!tags } }) => {
+function contributingRules(node, matched) {
+  if (!node.rules) return matched[node.index] ? [node.index] : null;
+  const children = node.rules.map((rule) => contributingRules(rule, matched));
+  if (node.match === 'all' && children.some((child) => child === null)) return null;
+  const accepted = children.filter((child) => child !== null);
+  return accepted.length ? [...new Set(accepted.flat())] : null;
+}
+
+function wordMatches(re, text, limit) {
+  const all = new RegExp(re.source, re.flags + 'g'), matches = [];
+  let match;
+  while (matches.length < limit && (match = all.exec(text))) {
+    if (match[0].length) matches.push({ start: match.index, end: match.index + match[0].length });
+    else all.lastIndex = match.index + (all.unicode && text.codePointAt(match.index) > 0xffff ? 2 : 1);
+  }
+  return matches;
+}
+
+function displayMatcher(plan) {
+  const leaves = plan.leaves.map((leaf) => ({ ...leaf, head: new RegExp(leaf.head.source, leaf.head.flags),
+    meaning: leaf.meaning ? meaningPatternMatcher(leaf.meaning) : null }));
+  return (definition) => {
+    const status = leaves.map((leaf) => ({
+      head: leaf.scope !== 'meaning' && leaf.head.test(definition.word),
+      meaning: leaf.scope !== 'headword' && definition.parts.length ? leaf.meaning?.(definition.parts) : null,
+    }));
+    const active = contributingRules(plan.tree, status.map((row) => !!(row.head || row.meaning))) || [];
+    const headRules = active.filter((index) => status[index].head && !leaves[index].negative);
+    const headMatches = mergeMatches(headRules.flatMap((index) => wordMatches(leaves[index].head, definition.word, Math.max(1, Math.floor(64 / headRules.length)))));
+    const meaningRules = active.filter((index) => status[index].meaning);
+    const first = meaningRules.map((index) => status[index].meaning).find((row) => row.match.end > row.match.start)
+      || { part: 0, match: { start: 0, end: 0 } };
+    if (definition.kind === 'h') return { headMatches };
+    const part = definition.parts[first.part] || { text: '' };
+    const snippet = regexSnippet(part.text, definition.pron, first.match, true);
+    const limit = definition.entry ? 200 : 64;
+    const matches = meaningRules.flatMap((index) => leaves[index].meaning(definition.parts, { collect: true,
+      limit: Math.max(1, Math.floor(limit / meaningRules.length)),
+      ...(definition.entry ? {} : { window: { part: first.part, from: snippet.bounds.from, to: snippet.bounds.to } }),
+    }).matches);
+    const spans = mergeMatches(matches.filter((hit) => hit.part === first.part).map((hit) => ({
+      start: snippet.bounds.prefix + Math.max(snippet.bounds.from, hit.match.start) - snippet.bounds.from,
+      end: snippet.bounds.prefix + Math.min(snippet.bounds.to, hit.match.end) - snippet.bounds.from,
+    })), snippet.text.length);
+    delete snippet.bounds;
+    return { headMatches, matches, snippet: { ...snippet, matches: spans } };
+  };
+}
+
+self.onmessage = ({ data: { words, phrases, tokens, definitions, plans, highlight, source, flags, limit, tags, masks, facets, sources, conditions, metadata = !!tags } }) => {
   try {
+    if (highlight) {
+      self.postMessage({ highlights: definitions.map(displayMatcher(highlight)) });
+      return;
+    }
+    if (definitions) {
+      const patterns = plans.map(meaningPatternMatcher);
+      self.postMessage({ matches: patterns.map((test) => definitions.flatMap((row, index) => {
+        const match = test(row.parts);
+        return match ? [{ index, ...match }] : [];
+      })) });
+      return;
+    }
     if (conditions) {
       const patterns = conditions.map((query) => new RegExp(query.source, query.flags));
       if (tokens) {

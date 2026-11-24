@@ -2,13 +2,13 @@
 //
 // Headword search runs over two in-memory lists (entries and sub-entry phrases), each kept
 // as one "compact" normalized string so a query is a handful of native indexOf scans.
-// All meaning searches use the existing sharded token index. Quoted phrases
-// verify candidate definitions; regexes run against indexed words in isolation.
+// Simple meaning words use the sharded token index. Phrases, exclusions and
+// patterns the index cannot represent are checked against definition text.
 // Meaning blocks are fetched on demand and kept in a small LRU cache.
 import { normalizeCompact, normalizeSpaced, normalizeQuoted, quotedMatch, tokenize, termTester } from './normalize.js';
-import { parseSearchQuery, isTaggedPattern, quotedIndexTerms, readHeadwordRegex, readMeaningRegex, hasTagFilters } from './search-syntax.js';
+import { parseSearchQuery, isTaggedPattern, quotedIndexTerms, readHeadwordRegex, readMeaningRegex, hasTagFilters, readSearchBuilder, buildSearchQuery } from './search-syntax.js';
 import { compatibleTagIndex, tagFilterMasks, matchesEntryTags } from './search-origin-grammar.js';
-import { plainMeaning, regexSnippet } from './search-match-text.js';
+import { plainMeaning, regexSnippet, compactMatches } from './search-match-text.js';
 import { compatibleSenseIndex, SENSE_TAGS, normalizeSenseFilters, hasSenseFilters, planSenseFilters } from './search-subject-usage.js';
 import { SOURCE_VERSION, SOURCE_TAGS, hasSourceFilters, decodeSourceOwners, planSourceFilters } from './search-citations.js';
 
@@ -314,8 +314,8 @@ function findTerm(text, terms, exact = false) {
   return prefixAt;
 }
 
-async function snippet(id, terms, exact, literal, range) {
-  const { pron, body } = await getRecord(id);
+async function snippet(id, terms, exact, literal, range, record) {
+  const { pron, body } = record || await getRecord(id);
   const text = plainText(range ? body.slice(range[0], range[1]) : body);
   if (literal) {
     const match = quotedMatch(text, normalizeQuoted(literal));
@@ -829,6 +829,100 @@ function patternMatcher(task) {
   });
 }
 
+const displayJobs = new Set();
+const cancelDisplayJobs = () => { for (const task of displayJobs) task.cancel(); };
+
+function displayTask(run) {
+  let rejectCancelled;
+  const cancelled = new Promise((_, reject) => { rejectCancelled = reject; });
+  const task = { cancelled: false, cleanup: null, cancel() {
+    task.cancelled = true;
+    task.cleanup?.();
+    rejectCancelled(new Error('نمایش نتیجه لغو شد.'));
+  } };
+  displayJobs.add(task);
+  return Promise.race([run(task), cancelled]).finally(() => {
+    task.cancelled = true;
+    task.cleanup?.();
+    displayJobs.delete(task);
+  });
+}
+
+let displayPlanCache;
+function displayPlan(q) {
+  if (displayPlanCache?.q === q) return displayPlanCache;
+  const query = parseSearchQuery(q), leaves = [];
+  const add = (node) => {
+    if (node.rules) return { match: node.match, rules: node.rules.map(add) };
+    const read = readSearchBuilder(`/${node.query.source}/${node.query.flags}`);
+    const negative = read.groups.every((group) => group.rules.every((rule) => ['excludes', 'not-starts', 'not-ends'].includes(rule.kind)))
+      || node.query.source.startsWith('^(?!');
+    const meaning = node.scope === 'headword' ? null : readMeaningRegex(node.query);
+    const head = readHeadwordRegex(node.query)?.query || node.query;
+    return { index: leaves.push({ scope: node.scope, head: { source: head.source, flags: head.flags }, negative,
+      meaning: meaning ? { match: meaning.match, groups: meaning.groups } : null }) - 1 };
+  };
+  let expression;
+  if (query.mode === 'scoped') expression = query.expression;
+  else {
+    const builder = readSearchBuilder(q);
+    expression = { match: builder.match, rules: builder.groups.map((group) => ({ match: group.match, rules: group.rules.map((rule) => ({
+      scope: 'both', query: parseSearchQuery(buildSearchQuery(rule.kind, rule.value, {}, query.flags)),
+    })) })) };
+  }
+  const plan = { tree: add(expression), leaves };
+  displayPlanCache = { q, query, plan };
+  return displayPlanCache;
+}
+
+// Extra highlight work is restricted to requested rows; search result selection
+// and index scans do not retain or enumerate additional occurrences.
+function displayHighlights({ q, filters = {}, tagMatch = {}, requests, entry = false }) {
+  return displayTask(async (task) => {
+    const { query, plan } = displayPlan(q);
+    const meanings = plan.leaves.some((leaf) => leaf.scope !== 'headword') && requests.some((row) => row.kind !== 'h');
+    const scoped = query.mode === 'scoped';
+    const context = meanings && (scoped || hasTagFilters(filters)) ? await filterContext(filters, tagMatch, false, true, scoped) : null;
+    if (task.cancelled) throw new Error('نمایش نتیجه لغو شد.');
+    const wanted = new Set(requests.map((row) => row.id));
+    const rowsByEntry = new Map();
+    for (let i = 0; i < (context?.rows?.length || 0); i++) {
+      const row = context.rows[i];
+      if (!wanted.has(row[0]) || !context.facets.allowed[i] || !context.acceptSense(row)) continue;
+      if (!rowsByEntry.has(row[0])) rowsByEntry.set(row[0], []);
+      rowsByEntry.get(row[0]).push(row);
+    }
+    const run = patternMatcher(task), result = [];
+    for (let offset = 0; offset < requests.length; offset += 40) {
+      const batch = requests.slice(offset, offset + 40);
+      const records = new Map(await Promise.all([...new Set(batch.map((row) => row.id))].map(async (id) => [id, await getRecord(id)])));
+      if (task.cancelled) throw new Error('نمایش نتیجه لغو شد.');
+      const definitions = batch.map((request) => {
+        const { body, pron } = records.get(request.id);
+        const word = request.word || words.display[request.id];
+        let rows = rowsByEntry.get(request.id) || [];
+        if (scoped) rows = rows.filter((row) => request.word ? row[1] > 0 && phrases.display[row[1] - 1] === request.word : row[1] === 0);
+        const parts = request.kind === 'h' ? [] : context?.facets.affectedEntries.has(request.id) ? rows.map((row) => {
+          let start = row[2];
+          if (scoped) start += body.slice(start, row[3]).match(/^(?:\x04\s*)?\x05[^\x06]+\x06\s*؛\s*/)?.[0].length || 0;
+          return { text: plainMeaning(body.slice(start, row[3])), range: [start, row[3]] };
+        }) : context?.facets.positive || context && !context.acceptEntry(request.id) ? [] : [{ text: plainMeaning(body) }];
+        return { word, pron, parts, kind: request.kind, entry };
+      });
+      const { highlights } = await run({ highlight: plan, definitions });
+      if (task.cancelled) throw new Error('نمایش نتیجه لغو شد.');
+      for (let i = 0; i < batch.length; i++) {
+        const request = batch[i], found = highlights[i];
+        const { body } = records.get(request.id);
+        if (entry) result.push({ headMatches: found.headMatches, matches: compactMatches(body, definitions[i].parts, found.matches), word: definitions[i].word });
+        else if (request.kind === 'h') result.push({ key: request.key, ...await snippet(request.id, [], false, '', undefined, records.get(request.id)), headMatches: found.headMatches });
+        else result.push({ key: request.key, id: request.id, ...found.snippet });
+      }
+    }
+    return result;
+  });
+}
+
 function tokenMatcher(query, task) {
   const run = patternMatcher(task);
   return async (tokens) => (await run({ tokens, source: query.source, flags: query.flags })).matches;
@@ -836,6 +930,109 @@ function tokenMatcher(query, task) {
 
 function patternShards(keys, prefixes) {
   return [...new Set(keys.filter(([key]) => !prefixes || prefixes.some((prefix) => key.startsWith(prefix) || prefix.startsWith(key))).map(([, id]) => id))];
+}
+
+function needsMeaningScan(parsed) {
+  if (parsed.query.source === '.*') return false;
+  const rules = parsed.groups.flatMap((group) => group.rules);
+  if (rules.length !== 1) return true;
+  const rule = rules[0];
+  if (!['contains', 'starts', 'ends', 'whole'].includes(rule.kind) || rule.negative
+    || /[\s\p{Script=Latin}]/u.test(rule.source) || tokenize(rule.value).length !== 1 || rule.value.length < 2) return true;
+  return [...stop].some((word) => rule.kind === 'whole' ? word === rule.value
+    : rule.kind === 'starts' ? word.startsWith(rule.value) : rule.kind === 'ends' ? word.endsWith(rule.value) : word.includes(rule.value));
+}
+
+function definitionEvidence(definition, hit) {
+  const part = definition.parts[hit.part];
+  return { ...(part.range ? { range: part.range } : {}), match: hit.match,
+    snippet: regexSnippet(part.text, definition.pron, hit.match) };
+}
+
+async function scanMeaningDefinitions(plans, task, { context, possible, scoped = false, exclude = new Set(), run = patternMatcher(task), onProgress, onBatch, stopped = () => false }) {
+  const rowsByEntry = new Map();
+  for (let index = 0; index < (context?.rows?.length || 0); index++) {
+    const row = context.rows[index];
+    if (!context.facets.allowed[index] || !context.acceptSense(row) || scoped && row[1] < 0) continue;
+    const owner = scoped && row[1] > 0 ? meta.entries + row[1] - 1 : row[0];
+    if (possible && !hasOwner(possible, owner)) continue;
+    if (!rowsByEntry.has(row[0])) rowsByEntry.set(row[0], []);
+    rowsByEntry.get(row[0]).push({ owner, range: row.slice(2, 4) });
+  }
+  const candidates = [];
+  for (let id = 0; id < meta.entries; id++) {
+    if (exclude.has(id)) continue;
+    if (context?.facets?.affectedEntries.has(id)) {
+      if (rowsByEntry.has(id)) candidates.push(id);
+    } else if (!context?.facets?.positive && (!context || context.acceptEntry(id)) && (!possible || hasOwner(possible, id))) candidates.push(id);
+  }
+  let scanned = 0, matched = 0;
+  onProgress?.({ stage: 'definitions', results: [], scanned, total: candidates.length, matched });
+  for (let offset = 0; offset < candidates.length && !stopped(); offset += 256) {
+    if (task.cancelled) return;
+    const ids = candidates.slice(offset, offset + 256);
+    const blockIds = new Map();
+    for (const id of ids) {
+      const block = blockOf(id);
+      if (!blockIds.has(block)) blockIds.set(block, []);
+      blockIds.get(block).push(id);
+    }
+    const blocks = [...blockIds.keys()];
+    const records = new Map();
+    for (let i = 0; i < blocks.length; i += 4) {
+      const batch = blocks.slice(i, i + 4);
+      const loaded = await Promise.all(batch.map(loadBlock));
+      if (task.cancelled) return;
+      batch.forEach((block, index) => {
+        for (const id of blockIds.get(block)) records.set(id, loaded[index][id - meta.blockStarts[block]]);
+      });
+    }
+    const definitions = [];
+    for (const id of ids) {
+      const record = records.get(id), separator = record.indexOf('\x1f');
+      const body = record.slice(separator + 1), pron = record.slice(0, separator);
+      const owners = new Map();
+      for (const row of rowsByEntry.get(id) || [{ owner: id }]) {
+        let start = row.range?.[0] || 0;
+        const end = row.range?.[1] ?? body.length;
+        if (scoped) {
+          const heading = body.slice(start, end).match(/^(?:\x04\s*)?\x05[^\x06]+\x06\s*؛\s*/);
+          if (heading) start += heading[0].length;
+        }
+        if (!owners.has(row.owner)) owners.set(row.owner, { id, owner: row.owner, pron, parts: [] });
+        owners.get(row.owner).parts.push({ text: plainMeaning(body.slice(start, end)), ...(row.range ? { range: [start, end] } : {}) });
+      }
+      definitions.push(...owners.values());
+    }
+    const { matches } = await run({ definitions, plans: plans.map(({ groups, match }) => ({ groups, match })) });
+    if (task.cancelled) return;
+    const update = onBatch(definitions, matches) || {};
+    scanned += ids.length;
+    matched = update.matched ?? matched;
+    onProgress?.({ stage: 'definitions', results: update.results || [], scanned, total: candidates.length, matched });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  return { scanned };
+}
+
+async function searchDefinitionMeanings(parsed, exclude, onProgress, task, context) {
+  const results = [];
+  const seen = new Set();
+  const scanned = await scanMeaningDefinitions([parsed], task, { context, exclude, onProgress,
+    stopped: () => results.length >= MEANING_LIMIT,
+    onBatch: (definitions, [matches]) => {
+      const delta = [];
+      for (const hit of matches) {
+        const definition = definitions[hit.index];
+        if (seen.has(definition.id) || results.length + delta.length >= MEANING_LIMIT) continue;
+        seen.add(definition.id);
+        delta.push({ id: definition.id, w: words.display[definition.id], ...definitionEvidence(definition, hit) });
+      }
+      results.push(...delta);
+      return { results: delta, matched: results.length };
+    },
+  });
+  return { results, terms: [], total: results.length, limited: results.length >= MEANING_LIMIT, scanned: scanned?.scanned || 0 };
 }
 
 async function searchSenseMeanings(parsed, tags, masks, exclude, onProgress, task) {
@@ -905,6 +1102,8 @@ function searchRegexMeanings(query, exclude, onProgress, context) {
     const filtered = !!(masks.include || masks.exclude);
     const tags = context?.tags || (filtered ? await loadTags(masks) : null);
     if (task.cancelled) return;
+    if (needsMeaningScan(parsed)) return searchDefinitionMeanings(parsed, exclude, onProgress, task,
+      context || (hasTagFilters(parsed.filters) ? await filterContext(parsed.filters, parsed.modes, false, true) : undefined));
     if (hasSenseFilters(parsed.filters) || context?.facets) return searchSenseMeanings(parsed, tags, masks, exclude, onProgress, task);
     // Metadata-only queries need no token shards or definition bodies.
     if ((filtered || context?.sources) && parsed.query.source === '.*') {
@@ -999,14 +1198,17 @@ function searchScopedConditions(query, filters, modes, onProgress) {
     for (let i = 0; i < size; i++) possible[i] &= allowed[i];
     const meaningMasks = leaves.map(empty);
     const terms = hasMeanings ? new Array(ownerCount) : [];
+    const evidence = hasMeanings ? new Array(ownerCount) : [];
     const rangeStart = new Uint32Array(hasMeanings ? ownerCount : 0);
     const rangeEnd = new Uint32Array(hasMeanings ? ownerCount : 0);
     if (hasMeanings && possible.some(Boolean)) {
       const parsed = leaves.map((node) => node.scope === 'headword' ? null : readMeaningRegex(node.query));
       if (parsed.some((part, i) => !part && leaves[i].scope !== 'headword')) throw new Error('این الگو در معنی‌ها اجرا نمی‌شود؛ آن را ساده‌تر کنید.');
-      const conditions = parsed.map((part, i) => ({ ...(part?.query || leaves[i].query), scope: leaves[i].scope }));
-      const prefixes = parsed.filter(Boolean).some((part) => !part.prefixes) ? null : parsed.filter(Boolean).flatMap((part) => part.prefixes);
-      const batches = meaningDirectories(context).map((directory) => ({ directory,
+      const scannedRules = parsed.flatMap((part, index) => part && needsMeaningScan(part) ? [index] : []);
+      const conditions = parsed.map((part, i) => ({ ...(part?.query || leaves[i].query), scope: scannedRules.includes(i) ? 'headword' : leaves[i].scope }));
+      const indexed = parsed.filter((part, i) => part && !scannedRules.includes(i));
+      const prefixes = indexed.some((part) => !part.prefixes) ? null : indexed.flatMap((part) => part.prefixes);
+      const batches = (indexed.length ? meaningDirectories(context) : []).map((directory) => ({ directory,
         ids: patternShards(directory === 's' ? meta.senseShardKeys : directory === 'u' ? meta.sourceSenseShardKeys : meta.shardKeys, prefixes) }));
       const total = batches.reduce((sum, batch) => sum + batch.ids.length, 0);
       let scanned = 0;
@@ -1041,6 +1243,23 @@ function searchScopedConditions(query, filters, modes, onProgress) {
           onProgress?.({ stage: 'index', results: [], scanned, total, matched: 0 });
         }
       }
+      if (scannedRules.length) {
+        const scanPossible = scopedMasks(tree, headMatches.masks, meaningMasks.map((mask, index) => scannedRules.includes(index) ? possible : mask)).matched;
+        for (let i = 0; i < scanPossible.length; i++) scanPossible[i] &= possible[i];
+        await scanMeaningDefinitions(scannedRules.map((index) => parsed[index]), task, { context, scoped: true, possible: scanPossible, run, onProgress,
+          onBatch: (definitions, matches) => {
+            for (let index = 0; index < matches.length; index++) {
+              for (const hit of matches[index]) {
+                const definition = definitions[hit.index];
+                addOwner(meaningMasks[scannedRules[index]], definition.owner);
+                const found = definitionEvidence(definition, hit);
+                if (found.match.end > found.match.start || !evidence[definition.owner] && !terms[definition.owner]) evidence[definition.owner] = found;
+              }
+            }
+          },
+        });
+        if (task.cancelled) return;
+      }
     }
     const matches = scopedMasks(tree, headMatches.masks, meaningMasks);
     const tiers = [[], [], [], []];
@@ -1059,7 +1278,7 @@ function searchScopedConditions(query, filters, modes, onProgress) {
       }
       if (hasOwner(matches.meaning, owner)) meaningOwners.push(owner);
     }
-    return { head: tiers.flat().slice(0, HEAD_LIMIT), meaningOwners: Uint32Array.from(meaningOwners), terms, rangeStart, rangeEnd };
+    return { head: tiers.flat().slice(0, HEAD_LIMIT), meaningOwners: Uint32Array.from(meaningOwners), terms, evidence, rangeStart, rangeEnd };
   });
 }
 
@@ -1076,7 +1295,8 @@ function scopedMeaningResults(found, exclude) {
     results.push({ id, w: (phrase ? phrases : words).display[line],
       ...(phrase ? { phrase: true, parent: words.display[id] } : {}),
       ...(found.terms[owner] ? { terms: [found.terms[owner]] } : {}),
-      ...(found.rangeEnd[owner] ? { range: [found.rangeStart[owner], found.rangeEnd[owner]] } : {}) });
+      ...(found.rangeEnd[owner] ? { range: [found.rangeStart[owner], found.rangeEnd[owner]] } : {}),
+      ...(found.evidence?.[owner] || {}) });
   }
   return { results, terms: [], total: Math.min(total, MEANING_LIMIT), limited: total > MEANING_LIMIT };
 }
@@ -1101,6 +1321,7 @@ const ready = init();
 const handlers = {
   async cancelSearch() {
     await ready;
+    cancelDisplayJobs();
     cancelPatternSearch();
     cancelMeaningPatternSearch();
     headSearchSeq++;
@@ -1134,6 +1355,7 @@ const handlers = {
   },
   async search({ q = '', filters = {}, tagMatch = {} }, onProgress) {
     await ready;
+    cancelDisplayJobs();
     filters = normalizeSenseFilters(filters);
     cancelPatternSearch();
     cancelMeaningPatternSearch();
@@ -1197,10 +1419,15 @@ const handlers = {
     await ready;
     return getEntry(id);
   },
-  async snippets({ ids, terms, exact, literal, requests }) {
+  async snippets({ ids, terms, exact, literal, requests, q, filters, tagMatch }) {
     await ready;
+    if (q && requests) return displayHighlights({ q, filters, tagMatch, requests });
     if (requests) return Promise.all(requests.map(async ({ key, id, terms, range }) => ({ key, ...await snippet(id, terms, exact, literal, range) })));
     return Promise.all(ids.map((id) => snippet(id, terms, exact, literal)));
+  },
+  async highlights({ id, q, filters, tagMatch, word }) {
+    await ready;
+    return (await displayHighlights({ q, filters, tagMatch, requests: [{ id, word, kind: 'm' }], entry: true }))[0];
   },
   async lookup({ word }) {
     // Resolve a headword to entry ids (exact matches), used for stored list items.

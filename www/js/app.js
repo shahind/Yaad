@@ -1,11 +1,11 @@
 import * as store from './store.js';
-import { renderMeaning, meaningText, markTerms, markMatch, markLiteral, highlightWord, esc } from './render.js';
+import { renderMeaning, meaningText, markTerms, markMatch, markLiteral, markRanges, highlightWord, esc } from './render.js';
 import { copyText, shareText, isNative, isElectron, plugin } from './platform.js';
 import { normalizeCompact, normalizeQuoted, quotedMatch, termTester } from './normalize.js';
 import { parseSearchQuery, buildWordQuery, readSearchBuilder, SEARCH_FILTER_TAGS, SEARCH_SCOPES, hasTagFilters, separateSearchFilters } from './search-syntax.js';
 import { ENTRY_TAGS, compatibleTagIndex } from './search-origin-grammar.js';
 import { SENSE_TAGS, compatibleSenseIndex, readOpeningTags, splitSenses } from './search-subject-usage.js';
-import { plainMeaning } from './search-match-text.js';
+import { plainMeaning, compactMatches } from './search-match-text.js';
 import { SOURCE_VERSION, SOURCE_TAGS, sourceOwners } from './search-citations.js';
 
 // ------------------------------------------------------------------ worker RPC
@@ -149,6 +149,10 @@ async function runSearch(q) {
   }
   search.mode = query.mode;
   search.text = query.text || '';
+  search.highlightContext = query.mode === 'regex' || query.mode === 'scoped' ? encodeURIComponent(JSON.stringify([q,
+    Object.fromEntries(Object.entries(filters).filter(([, state]) => state === 1 || state === -1)),
+    Object.fromEntries(Object.entries(tagMatch).filter(([, mode]) => mode === 'all')),
+  ])) : '';
   el.q.dir = query.mode === 'regex' || query.mode === 'scoped' ? 'ltr' : 'rtl';
   if (!filterCount && ((query.mode === 'text' && !normalizeCompact(query.text)) || (query.mode === 'exact' && !normalizeQuoted(query.text)))) {
     call('cancelSearch').catch(() => {});
@@ -197,7 +201,7 @@ async function runSearch(q) {
         }
         el.status.textContent = progress.stage === 'index'
           ? `${headCount(head)} واژه · جستجو در معنی‌ها: ${fa(progress.scanned)} از ${fa(progress.total)} بخش · ${fa(progress.matched)} نتیجه`
-          : `${headCount(head)} واژه · بررسی عبارت: ${fa(progress.scanned)} از ${fa(progress.total)} مدخل · ${fa(progress.matched)} نتیجه`;
+          : `${headCount(head)} واژه · ${progress.stage === 'definitions' ? 'بررسی معنی‌ها' : 'بررسی عبارت'}: ${fa(progress.scanned)} از ${fa(progress.total)} مدخل · ${fa(progress.matched)} نتیجه`;
       });
       if (seq !== search.seq) return;
       search.meaning = r.results;
@@ -231,14 +235,15 @@ function showSearchError(error) {
 
 function itemHTML(r, kind) {
   const terms = r.terms || search.terms;
-  const href = r.range ? entryHref(r.id, `?s=${r.range.join(',')}${search.mode === 'exact' ? `&q=${encodeURIComponent(search.text)}` : terms.length ? `&t=${encodeURIComponent(terms.join(' '))}${r.terms ? '&exact=1' : ''}` : ''}`) : r.phrase
+  let href = r.range ? entryHref(r.id, `?s=${r.range.join(',')}${kind === 'm' && r.match ? `&r=${r.match.start},${r.match.end}` : search.mode === 'exact' ? `&q=${encodeURIComponent(search.text)}` : terms.length ? `&t=${encodeURIComponent(terms.join(' '))}${r.terms ? '&exact=1' : ''}` : ''}`) : r.phrase
     ? entryHref(r.id, `?p=${encodeURIComponent(r.w)}`)
     : kind === 'm'
       ? entryHref(r.id, r.match ? `?r=${r.match.start},${r.match.end}` : search.mode === 'exact' ? `?q=${encodeURIComponent(search.text)}` : `?t=${encodeURIComponent(terms.join(' '))}${r.terms ? '&exact=1' : ''}`)
       : entryHref(r.id);
+  if (search.highlightContext) href += `${href.includes('?') ? '&' : '?'}h=${search.highlightContext}${r.phrase ? `&hw=${encodeURIComponent(r.w)}` : ''}`;
   const word = kind === 'h' ? highlightWord(r.w, search.text, r.match) : esc(r.w);
   const extra = r.phrase ? `<span class="tag">ترکیب</span><span class="item-parent">در «${esc(r.parent)}»</span>` : '';
-  return `<a class="item" href="${href}" data-id="${r.id}" data-kind="${kind}" data-p="${r.phrase ? 1 : 0}"${r.terms ? ` data-t="${esc(r.terms.join(' '))}"` : ''}${r.range ? ` data-s="${r.range.join(',')}"` : ''}${r.snippet ? ' data-obs="1"' : ''}>
+  return `<a class="item" href="${href}" data-id="${r.id}" data-kind="${kind}" data-w="${esc(r.w)}" data-p="${r.phrase ? 1 : 0}"${r.terms ? ` data-t="${esc(r.terms.join(' '))}"` : ''}${r.range ? ` data-s="${r.range.join(',')}"` : ''}${r.snippet && !search.highlightContext ? ' data-obs="1"' : ''}>
     <div class="item-head"><span class="item-word">${word}</span><span class="item-pron">${r.snippet ? esc(r.snippet.pron) : ''}</span>${extra}</div>
     <div class="item-snippet">${r.snippet ? markMatch(r.snippet.text, r.snippet.match) : ''}</div></a>`;
 }
@@ -354,6 +359,8 @@ const snippetObserver = new IntersectionObserver(
 
 async function flushSnippets() {
   snippetScheduled = false;
+  const current = { ...search, filters: { ...search.filters }, tagMatch: { ...search.tagMatch } };
+  const pattern = current.mode === 'regex' || current.mode === 'scoped';
   const items = snippetQueue.splice(0);
   const groups = { plain: [], terms: [] };
   for (const it of items) {
@@ -364,29 +371,36 @@ async function flushSnippets() {
     const request = (it) => {
       const words = it.dataset.t ? it.dataset.t.split(' ') : terms;
       const range = it.dataset.s ? it.dataset.s.split(',').map(Number) : undefined;
-      const key = `${it.dataset.id}|${exact ? 'exact' : 'text'}|${words.join(' ')}|${literal}|${it.dataset.s || ''}`;
-      return { key, id: +it.dataset.id, terms: words, range };
+      const key = `${it.dataset.id}|${exact ? 'exact' : 'text'}|${words.join(' ')}|${literal}|${it.dataset.s || ''}${pattern ? `|${current.seq}|${it.dataset.kind}|${it.dataset.w}` : ''}`;
+      return { key, id: +it.dataset.id, terms: words, range, kind: it.dataset.kind, ...(it.dataset.p === '1' ? { word: it.dataset.w } : {}) };
     };
     const need = [...new Map(its.map(request).filter((row) => !snippetCache.has(row.key)).map((row) => [row.key, row])).values()];
     if (need.length) {
-      const res = await call('snippets', { requests: need, exact, literal });
+      let res;
+      try {
+        res = await call('snippets', { requests: need, exact, literal,
+          ...(pattern ? { q: current.q, filters: current.filters, tagMatch: current.tagMatch } : {}) });
+      } catch { return; }
+      if (current.seq !== search.seq) return;
       for (const r of res) snippetCache.set(r.key, r);
       if (snippetCache.size > 3000) snippetCache.clear();
     }
     for (const it of its) {
+      if (!it.isConnected || current.seq !== search.seq) continue;
       const row = request(it);
       const s = snippetCache.get(row.key);
       if (!s) continue;
       const sn = it.querySelector('.item-snippet');
-      if (s.match) sn.innerHTML = markMatch(s.text, s.match);
+      if (s.matches || s.match) sn.innerHTML = markMatch(s.text, s.matches || s.match);
       else {
         sn.textContent = s.text;
         if (row.terms.length) markTerms(sn, row.terms, exact);
       }
+      if (s.headMatches) it.querySelector('.item-word').innerHTML = highlightWord(it.dataset.w, current.text, s.headMatches);
       if (s.pron && it.dataset.p !== '1') it.querySelector('.item-pron').textContent = s.pron;
     }
   };
-  await Promise.all([fill(groups.plain, []), fill(groups.terms, search.terms, search.mode === 'regex' || search.mode === 'scoped', search.mode === 'exact' ? search.text : '')]);
+  await Promise.all([fill(groups.plain, []), fill(groups.terms, current.terms, pattern, current.mode === 'exact' ? current.text : '')]);
 }
 
 // Keyboard navigation in results.
@@ -533,16 +547,41 @@ async function showEntry(id, params) {
   el.view.scrollTop = 0;
   const meaning = $('#meaning');
   let focus = null;
-  if (/^\d+,\d+$/.test(params.get('s') || '')) {
+  let detailed = false;
+  if (params.has('h')) {
+    try {
+      const [q, filters, tagMatch] = JSON.parse(params.get('h'));
+      const highlights = await call('highlights', { id: e.id, q, filters, tagMatch, word: params.get('hw') || undefined });
+      if (!meaning.isConnected) return;
+      focus = markRanges(meaning, highlights.matches)[0];
+      const heading = highlights.word === e.word ? $('.entry-word', el.view)
+        : [...meaning.querySelectorAll('b.hl')].find((node) => normalizeCompact(node.textContent) === normalizeCompact(highlights.word));
+      if (heading) {
+        heading.innerHTML = highlightWord(heading.textContent, '', highlights.headMatches);
+        if (!focus && highlights.headMatches.length) focus = heading;
+      }
+      detailed = true;
+    } catch { /* Keep the original match available if extra highlighting fails. */ }
+  }
+  if (!detailed && /^\d+,\d+$/.test(params.get('s') || '')) {
     const [start, end] = params.get('s').split(',').map(Number);
     const text = plainMeaning(e.body.slice(start, end));
     const test = termTester((params.get('t') || '').split(' ').filter(Boolean), params.get('exact') === '1');
-    const literal = params.get('q') ? quotedMatch(text, normalizeQuoted(params.get('q'))) : null;
+    const literal = /^\d+,\d+$/.test(params.get('r') || '')
+      ? Object.fromEntries(params.get('r').split(',').map((value, index) => [index ? 'end' : 'start', Number(value)]))
+      : params.get('q') ? quotedMatch(text, normalizeQuoted(params.get('q'))) : null;
     const found = literal ? null : [...text.matchAll(/[^\s.,;:!?()[\]«»"'،؛؟]+/g)].find((match) => test(match[0]));
     const at = literal?.start ?? found?.index ?? 0;
     const needle = literal ? text.slice(literal.start, literal.end) : found?.[0] || text.slice(0, 160);
-    focus = markLiteral(meaning, needle, plainMeaning(e.body.slice(0, start)) + text.slice(0, at))[0];
-  } else if (params.get('p')) {
+    if (!literal && params.get('t')) {
+      const matches = [];
+      for (const match of text.matchAll(/[^\s.,;:!?()[\]«»"'،؛؟]+/g)) {
+        if (test(match[0])) matches.push({ part: 0, match: { start: match.index, end: match.index + match[0].length } });
+        if (matches.length === 200) break;
+      }
+      focus = markRanges(meaning, compactMatches(e.body, [{ text, range: [start, end] }], matches))[0];
+    } else focus = markLiteral(meaning, needle, plainMeaning(e.body.slice(0, start)) + text.slice(0, at))[0];
+  } else if (!detailed && params.get('p')) {
     // Opened from a sub-entry phrase: scroll to it.
     const target = normalizeCompact(params.get('p'));
     focus = [...meaning.querySelectorAll('b.hl')].find((b) => normalizeCompact(b.textContent) === target);
@@ -552,16 +591,16 @@ async function showEntry(id, params) {
       mk.append(focus);
       focus = mk;
     }
-  } else if (/^\d+,\d+$/.test(params.get('r') || '')) {
+  } else if (!detailed && /^\d+,\d+$/.test(params.get('r') || '')) {
     const [start, end] = params.get('r').split(',').map(Number);
     const text = plainMeaning(e.body);
     const needle = text.slice(start, Math.min(end, start + 200));
     focus = markLiteral(meaning, needle, text.slice(0, start))[0];
-  } else if (params.get('q')) {
+  } else if (!detailed && params.get('q')) {
     const text = plainMeaning(e.body);
     const match = quotedMatch(text, normalizeQuoted(params.get('q')));
     if (match) focus = markLiteral(meaning, text.slice(match.start, match.end), text.slice(0, match.start))[0];
-  } else if (params.get('t')) {
+  } else if (!detailed && params.get('t')) {
     focus = markTerms(meaning, params.get('t').split(' ').filter(Boolean), params.get('exact') === '1')[0];
   }
   if (focus) {
@@ -759,7 +798,7 @@ const SEARCH_HELPERS = [
   ['excludes', 'بدون این نوشته', 'یاد'],
   ['not-starts', 'آغاز نشود با', 'نا'],
   ['not-ends', 'پایان نیابد با', 'ها'],
-  ['exact', 'عبارت درون گیومه', 'یاد', 'فاصله‌های آغاز و پایان حفظ می‌شوند. برای عبارت چندواژه‌ای در معنی‌ها، آن را در نوار جستجو داخل گیومه بگذارید.'],
+  ['exact', 'عبارت دقیق', 'یاد آوردن', 'فاصله‌های آغاز و پایان حفظ می‌شوند؛ عبارت چندواژه‌ای در معنی‌ها هم جستجو می‌شود.'],
   ['whole', 'برابری کامل', 'یاد', 'کل واژه یا ترکیب برابر باشد.'],
   ['either', 'یکی از چند گزینه', 'یاد، خاطر', 'گزینه‌ها را با ویرگول جدا کنید.'],
   ['wildcard', 'جای خالی در واژه', 'ک?اب', '? یک نویسه و * هر تعداد نویسه است؛ ک?اب: کتاب یا کباب؛ یاد*: یاد، یادگار، یاد رفتن و…'],
@@ -984,7 +1023,7 @@ function openSearchHelp(tab) {
            <h4>عبارت و الگو</h4>
            <p class="search-guide">عبارت: <bdi dir="ltr"><code>«یاد»</code></bdi>؛ الگو: <bdi dir="ltr"><code>/^یاد/</code></bdi>. هر دو در واژه‌ها، ترکیب‌ها و معنی‌ها جستجو می‌شوند.</p>
            <p class="search-guide"><bdi dir="ltr"><code>«یاد»</code></bdi> «یادگار» را هم می‌یابد؛ <bdi dir="ltr"><code>«یاد »</code></bdi> پس از «یاد» فاصله می‌خواهد. برای کل واژه یا ترکیب، «برابری کامل» را انتخاب کنید؛ در معنی‌ها، این شرط هر واژه را جداگانه می‌سنجد.</p>
-           <p class="search-guide">در معنی‌ها، الگو هر واژه را جداگانه می‌سنجد؛ ^ و $ آغاز و پایان همان واژه‌اند. حرف‌ها و رقم‌ها یکدست، و اعراب و نیم‌فاصله حذف می‌شوند. برای چند واژهٔ پشت‌سرهم از گیومه استفاده کنید. عبارت‌های کوتاه داخل پرانتز در این جستجو بررسی نمی‌شوند.</p>
+           <p class="search-guide">در معنی‌ها، ^ و $ مرز آغاز و پایان واژه‌اند؛ الگو می‌تواند چند واژه را در بر بگیرد. حرف‌های فارسی و عربی و رقم‌ها یکدست، و اعراب و نیم‌فاصله حذف می‌شوند. «بدون این نوشته» نتیجه‌هایی را حذف می‌کند که آن نوشته در معنی‌شان آمده باشد. بررسی الگوهای چندواژه‌ای و شرط‌های منفی ممکن است بیشتر طول بکشد.</p>
            <h4>برچسب‌ها و یادکردها</h4>
            <p class="search-guide">برای هر برچسب، هر واژه یا ترکیب یک بار شمرده می‌شود. شمارها با جستجو یا انتخاب برچسب تغییر نمی‌کنند.</p>
            <p class="search-guide">در هر دسته، «دست‌کم یکی» کافی است؛ برای الزام همه، «همهٔ انتخاب‌ها» را برگزینید. دسته‌ها با هم ترکیب می‌شوند.</p>

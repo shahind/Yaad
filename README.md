@@ -45,7 +45,8 @@ Microsoft signs it, so no code-signing certificate is needed.
 - **Search inside meanings**: «یاد» also finds «خاطره» (whose meaning lists «یادگار»),
   ranked by relevance (synonym-style definitions and early mentions first).
 - **Quoted and regex search**: `"یاد آوردن"` / `«یاد آوردن»` preserve spaces; `/^یاد/`
-  matches headwords and normalized indexed words in meanings. Quoted meaning phrases check up to 1,000 candidates.
+  matches headwords and words or phrases inside meanings. Meaning patterns preserve word boundaries
+  for `^` and `$`; exclusions apply across the selected definition. Quoted meaning phrases check up to 1,000 candidates.
 - **Advanced search**: pattern helpers and independent origin, grammar, subject, usage and citation filters.
   Subject/usage filters match one meaning; citations match the entry or compound. Tag counts are global.
 - **Favorites and custom lists** (create / rename / delete / share a list).

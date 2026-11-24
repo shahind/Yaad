@@ -2,16 +2,59 @@
 //   \n line break, \x01 new sense, \x02..\x03 citation, \x04 sub-entry,
 //   \x05..\x06 highlighted phrase, \x0e..\x0f inline pronunciation
 import { normalizeCompact, termTester } from './normalize.js';
-import { literalRange } from './search-match-text.js';
+import { literalRange, mergeMatches, compactMeaning } from './search-match-text.js';
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
 export const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ESC[c]);
 
-export function markMatch(text, match) {
-  if (!match || match.end <= match.start) return esc(text);
-  const start = Math.max(0, match.start);
-  const end = Math.min(text.length, match.end);
-  return esc(text.slice(0, start)) + '<mark>' + esc(text.slice(start, end)) + '</mark>' + esc(text.slice(end));
+function markedText(text, matches, tag) {
+  let html = '', at = 0;
+  for (const { start, end } of mergeMatches(Array.isArray(matches) ? matches : [matches], text.length)) {
+    html += esc(text.slice(at, start)) + `<${tag}>` + esc(text.slice(start, end)) + `</${tag}>`;
+    at = end;
+  }
+  return html + esc(text.slice(at));
+}
+
+export function markMatch(text, matches) {
+  return markedText(text, matches, 'mark');
+}
+
+export function markRanges(root, ranges) {
+  const matches = mergeMatches(ranges);
+  if (!matches.length) return [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  const marks = [];
+  let position = 0, index = 0;
+  for (const node of nodes) {
+    const text = node.nodeValue, spans = [];
+    for (let offset = 0; offset < text.length; offset++) {
+      if (!compactMeaning(text[offset])) continue;
+      while (index < matches.length && position >= matches[index].end) index++;
+      if (index < matches.length && position >= matches[index].start) {
+        const last = spans.at(-1);
+        if (last?.index === index) last.end = offset + 1;
+        else spans.push({ start: offset, end: offset + 1, index });
+      }
+      position++;
+    }
+    if (!spans.length) continue;
+    const fragment = document.createDocumentFragment();
+    let at = 0;
+    for (const { start, end } of spans) {
+      fragment.append(text.slice(at, start));
+      const mark = document.createElement('mark');
+      mark.textContent = text.slice(start, end);
+      fragment.append(mark);
+      marks.push(mark);
+      at = end;
+    }
+    fragment.append(text.slice(at));
+    node.replaceWith(fragment);
+  }
+  return marks;
 }
 
 export function markLiteral(root, needle, before) {
@@ -125,8 +168,7 @@ export function markTerms(root, terms, exact = false) {
 export function highlightWord(word, query, match) {
   // Regex offsets come from the isolated worker; never execute user regexes on the UI thread.
   if (match) {
-    if (match.start === match.end) return esc(word);
-    return esc(word.slice(0, match.start)) + '<b>' + esc(word.slice(match.start, match.end)) + '</b>' + esc(word.slice(match.end));
+    return markedText(word, match, 'b');
   }
   const q = normalizeCompact(query);
   if (!q) return esc(word);

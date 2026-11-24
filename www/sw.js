@@ -1,7 +1,7 @@
 // Service worker for the web build: the app shell is precached; dictionary data files are
 // cached the first time they are used (or all at once from Settings), so the web version
 // keeps working offline.
-const SHELL = 'yaad-shell-v3';
+const SHELL = 'yaad-shell-v5';
 const DATA = 'yaad-data-v1';
 const SHELL_FILES = [
   './',
@@ -14,6 +14,7 @@ const SHELL_FILES = [
   'js/search-subject-usage.js',
   'js/search-citations.js',
   'js/search-match-text.js',
+  'js/search-meaning-pattern.js',
   'js/regex.worker.js',
   'js/normalize.js',
   'js/render.js',
