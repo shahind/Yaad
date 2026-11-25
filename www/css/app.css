@@ -539,6 +539,10 @@ svg {
   unicode-bidi: isolate;
 }
 
+.search-reference dt code {
+  white-space: nowrap;
+}
+
 .search-reference dd {
   margin: 0;
   color: var(--text-2);
@@ -1446,6 +1450,28 @@ mark {
   flex-direction: column;
   overflow: hidden;
   padding: 0;
+  color: var(--text);
+}
+
+.search-sheet :is(
+  .field-label,
+  .search-guide,
+  .search-case-option,
+  .tag-mode,
+  .tag-count-note,
+  .tag-filter-count,
+  .search-reference dd
+) {
+  color: var(--text);
+}
+
+.search-sheet .text-input {
+  color: var(--text);
+}
+
+.search-sheet .text-input::placeholder {
+  color: var(--text-2);
+  opacity: 1;
 }
 
 .sheet.search-sheet::before {

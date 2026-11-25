@@ -451,7 +451,7 @@ async function renderHome() {
   const hist = store.getState().history;
   el.home.innerHTML = `
     <div class="hero" id="hero">
-      <div class="hero-label">${icon('shuffle')} واژهٔ تصادفی</div>
+      <div class="hero-label">${icon('shuffle')} واژهٔ کاتوره</div>
       <div class="hero-word" id="hero-word">…</div>
       <div class="hero-text" id="hero-text"></div>
       <div class="hero-actions"><button class="chip-btn" id="hero-next">${icon('shuffle')} واژهٔ دیگر</button></div>
@@ -926,6 +926,13 @@ function bindTagChoices(sheet, filters, modes, onChange) {
   tagCountsRequest.then(() => { if ($('#search-builder', sheet) === form) drawCounts(); });
 }
 
+const syntaxHTML = (text) => `<bdi dir="ltr"><code>${esc(text)}</code></bdi>`;
+const SEARCH_NOTATION = Object.fromEntries(Object.entries({
+  start: '^', end: '$', prefixExample: '^یاد', delimiter: '/', backslash: '\\',
+  wildcardOne: '?', wildcardMany: '*', wildcardExample: 'ک?اب',
+}).map(([key, text]) => [key, syntaxHTML(text)]));
+const searchGuideHTML = (text) => formatSearchString(esc(text), SEARCH_NOTATION);
+
 function ruleGroupsHTML(groups) {
   return groups.map((group, gi) => `<fieldset class="search-rule-group" data-group="${gi}">
     <legend>گروه ${fa(gi + 1)}</legend>
@@ -954,7 +961,7 @@ function ruleGroupsHTML(groups) {
           <input class="text-input" id="rule-value-${gi}-${ri}" data-rule-value value="${esc(rule.value)}" placeholder="${esc(helper[2])}" inputmode="${numeric ? 'numeric' : 'text'}" dir="${numeric || rule.kind === 'regex' || rule.kind === 'length-range' ? 'ltr' : 'rtl'}" aria-describedby="${hint ? hintId + ' ' : ''}search-builder-error" autocomplete="off" spellcheck="false" />
         </label>
         <button class="icon-btn search-remove-rule" type="button" data-remove-rule aria-label="حذف شرط ${fa(ri + 1)} از گروه ${fa(gi + 1)}">${icon('x')}</button>
-        <p class="search-guide" id="${hintId}" data-rule-hint${hint ? '' : ' hidden'}>${esc(hint)}</p>
+        <p class="search-guide" id="${hintId}" data-rule-hint${hint ? '' : ' hidden'}>${searchGuideHTML(hint)}</p>
       </div>`;
     }).join('')}
     <button class="link-btn" type="button" data-add-rule>+ افزودن شرط</button>
@@ -969,6 +976,7 @@ function openSearchHelp(tab) {
   const filters = { ...search.filters };
   const tagMatch = { ...search.tagMatch };
   let original = el.q.value;
+  let originalInvalid = false;
   try {
     original = canonicalizeSearchQuery(original);
     const current = readSearchHelperBuilder(original);
@@ -978,8 +986,8 @@ function openSearchHelp(tab) {
       if (!tab) initialTab = 'pattern';
     }
   } catch {
-    // An incomplete query can still be replaced using the builder.
-    original = '';
+    originalInvalid = true;
+    if (!tab) initialTab = 'pattern';
   }
   const originalPattern = JSON.stringify([groups, match, flags]);
   openSheet(
@@ -1011,7 +1019,7 @@ function openSearchHelp(tab) {
            <p class="search-guide">عبارت: <bdi dir="ltr"><code>«یاد»</code></bdi>؛ الگو: <bdi dir="ltr"><code>/^یاد/</code></bdi>. هر دو در واژه‌ها، ترکیب‌ها و معنی‌ها جستجو می‌شوند.</p>
            <p class="search-guide">${esc(SEARCH_STRINGS.guide.completeWords)}</p>
            <p class="search-guide">${esc(SEARCH_STRINGS.guide.meaningWords)}</p>
-           <p class="search-guide">${esc(SEARCH_STRINGS.guide.meaningPatterns)}</p>
+           <p class="search-guide">${searchGuideHTML(SEARCH_STRINGS.guide.meaningPatterns)}</p>
            <h4>برچسب‌ها و یادکردها</h4>
            <p class="search-guide">برای هر برچسب، هر واژه یا ترکیب یک بار شمرده می‌شود. شمارها با جستجو یا انتخاب برچسب تغییر نمی‌کنند.</p>
            <p class="search-guide">در هر دسته، «دست‌کم یکی» کافی است؛ برای الزام همه، «همهٔ انتخاب‌ها» را برگزینید. دسته‌ها با هم ترکیب می‌شوند.</p>
@@ -1019,13 +1027,7 @@ function openSearchHelp(tab) {
            <p class="search-guide">یادکرد در کل مدخل یا ترکیب جستجو می‌شود؛ هر معنی لزوماً از آن اثر نیست. یادکردهای ترکیب از واژهٔ اصلی جدا هستند.</p>
            <p class="search-guide">همین نوشته در نوار جستجو قرار می‌گیرد؛ برچسب‌ها جداگانه اعمال می‌شوند.</p>
            <details class="search-reference"><summary>نشانه‌های الگو</summary>
-       <dl><dt><code>^</code> / <code>$</code></dt><dd>آغاز / پایانِ واژه</dd>
-       <dt><code>.</code> / <code>.*</code></dt><dd>یک نویسه / هر تعداد نویسه</dd>
-       <dt><code>[ابپ]</code></dt><dd>یکی از ا، ب یا پ</dd>
-       <dt><code>(یاد|خاطر)</code></dt><dd>یکی از دو گزینه</dd>
-       <dt><code>{4}</code> / <code>{2,5}</code></dt><dd>۴ بار / ۲ تا ۵ بار؛ شمار تکرار را لاتین بنویسید.</dd>
-       <dt><code>?</code> / <code>+</code></dt><dd>اختیاری / یک یا چند بار تکرار</dd>
-       <dt><code>\\.</code></dt><dd>خود نقطه؛ برای نشانهٔ ویژه، پیش از آن \\ بگذارید.</dd></dl>
+       <dl>${SEARCH_STRINGS.guide.regexSymbols.map(([symbol, description]) => `<dt>${syntaxHTML(symbol)}</dt><dd>${searchGuideHTML(description)}</dd>`).join('')}</dl>
      </details>
          </section>
        </div>
@@ -1078,18 +1080,28 @@ function openSearchHelp(tab) {
       const preview = $('#search-preview', sheet);
       const error = $('#search-builder-error', sheet);
       const apply = $('#search-apply', sheet);
+      const ignoreCase = $('#search-ignore-case', sheet);
       let built = '';
       const update = () => {
+        const rules = groups.flatMap((group) => group.rules)
+          .filter((rule) => rule.kind === 'exact' ? rule.value.length : rule.value.trim());
+        const caseFlags = rules.map((rule) => (rule.flags || flags).includes('i'));
+        ignoreCase.checked = caseFlags.length ? caseFlags.every(Boolean) : flags.includes('i');
+        ignoreCase.indeterminate = caseFlags.some(Boolean) && !ignoreCase.checked;
+        const unchanged = JSON.stringify([groups, match, flags]) === originalPattern;
+        const preserveOriginal = unchanged || originalInvalid && !rules.length;
         try {
-          built = JSON.stringify([groups, match, flags]) === originalPattern ? original : buildWordQuery(groups, match, flags, original);
+          built = preserveOriginal ? original : buildWordQuery(groups, match, flags, originalInvalid ? '' : original);
+          const query = parseSearchQuery(built);
           preview.textContent = built || (hasTagFilters(filters) ? 'جستجو فقط با برچسب‌ها' : '');
-          preview.dir = built.startsWith('/') || parseSearchQuery(built).mode === 'scoped' ? 'ltr' : 'auto';
+          preview.dir = query.mode === 'regex' || query.mode === 'scoped' ? 'ltr' : 'auto';
           error.textContent = '';
           apply.disabled = false;
         } catch (e) {
           built = '';
-          preview.textContent = '…';
-          const hasInput = groups.some((group) => group.rules.some((rule) => rule.value.trim()));
+          preview.textContent = preserveOriginal && originalInvalid ? original : '…';
+          preview.dir = preserveOriginal && originalInvalid && original.startsWith('/') ? 'ltr' : 'auto';
+          const hasInput = preserveOriginal && originalInvalid || rules.length;
           error.textContent = hasInput ? e.message : '';
           apply.disabled = true;
         }
@@ -1112,7 +1124,7 @@ function openSearchHelp(tab) {
         input.dir = numeric || rule.kind === 'regex' || rule.kind === 'length-range' ? 'ltr' : 'rtl';
         $('[data-rule-label]', row).textContent = numeric ? SEARCH_STRINGS.controls.length : SEARCH_STRINGS.controls.text;
         const hint = $('[data-rule-hint]', row);
-        hint.textContent = helper[3] || '';
+        hint.innerHTML = searchGuideHTML(helper[3] || '');
         hint.hidden = !helper[3];
         input.setAttribute('aria-describedby', `${helper[3] ? hint.id + ' ' : ''}search-builder-error`);
       };
@@ -1175,13 +1187,21 @@ function openSearchHelp(tab) {
       $('#search-clear-rules', sheet).onclick = () => {
         groups = [{ match: 'all', rules: [{ kind: 'contains', value: '' }] }];
         match = 'any';
+        original = '';
+        originalInvalid = false;
         draw();
         focusRule(0, 0);
         update();
       };
-      $('#search-ignore-case', sheet).onchange = (event) => {
-        flags = flags.replace(/i/g, '') + (event.target.checked ? 'i' : '');
-        for (const group of groups) for (const rule of group.rules) delete rule.flags;
+      ignoreCase.onchange = () => {
+        const previousFlags = flags;
+        const suffix = ignoreCase.checked ? 'i' : '';
+        flags = previousFlags.replace(/i/g, '') + suffix;
+        for (const group of groups) for (const rule of group.rules) {
+          const next = (rule.flags || previousFlags).replace(/i/g, '') + suffix;
+          if (next === flags) delete rule.flags;
+          else rule.flags = next;
+        }
         update();
       };
       bindTagChoices(sheet, filters, tagMatch, update);
