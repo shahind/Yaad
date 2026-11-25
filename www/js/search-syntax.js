@@ -5,17 +5,193 @@ import { SOURCE_TAGS } from './search-citations.js';
 import { normalizeSpaced, normalizeQuoted } from './normalize.js';
 import { normalizeMeaningPattern } from './search-meaning-pattern.js';
 
+export const SEARCH_STRINGS = {
+  scopes: {
+    both: 'سرواژه و متن معنی',
+    headword: 'سرواژه یا ترکیب',
+    meaning: 'متن معنی',
+  },
+  helpers: {
+    starts: {
+      label: 'سرواژه آغاز شود با', example: 'یاد',
+      hint: 'آغاز کل سرواژه یا ترکیب سنجیده می‌شود.',
+    },
+    ends: {
+      label: 'سرواژه پایان یابد با', example: 'گار',
+      hint: 'پایان کل سرواژه یا ترکیب سنجیده می‌شود.',
+    },
+    contains: {
+      label: 'دارای این نوشته یا عبارت', example: 'یاد',
+      hint: 'نوشته در هر جای سرواژه پیدا شود. برای برابر بودن کل سرواژه، «برابری با کل سرواژه» را برگزینید.',
+    },
+    excludes: {
+      label: 'بدون این نوشته در سرواژه', example: 'یاد',
+      hint: 'سرواژه‌هایی که این نوشته در هر جایشان آمده باشد نشان داده نمی‌شوند.',
+    },
+    'not-starts': {
+      label: 'سرواژه آغاز نشود با', example: 'نا',
+      hint: 'سرواژه‌هایی که با این نوشته آغاز می‌شوند نشان داده نمی‌شوند.',
+    },
+    'not-ends': {
+      label: 'سرواژه پایان نیابد با', example: 'ها',
+      hint: 'سرواژه‌هایی که با این نوشته پایان می‌یابند نشان داده نمی‌شوند.',
+    },
+    exact: {
+      label: 'عبارت با فاصله‌های مشخص', example: 'یاد آوردن',
+      hint: 'نوشته و فاصله‌های آغاز و پایان آن حفظ می‌شوند؛ چند واژه باید پشت سر هم باشند.',
+    },
+    whole: {
+      label: 'برابری با کل سرواژه', example: 'یاد',
+      hint: 'کل سرواژه یا ترکیب باید برابر باشد.',
+    },
+    either: {
+      label: 'دارای یکی از این نوشته‌ها', example: 'یاد، خاطر',
+      hint: 'گزینه‌ها را با ویرگول جدا کنید؛ هر گزینه می‌تواند یک عبارت باشد.',
+    },
+    wildcard: {
+      label: 'جای خالی در سرواژه', example: 'ک?اب',
+      hint: '? یک نویسه و * هر تعداد نویسه در سرواژه است؛ ک?اب: کتاب یا کباب.',
+    },
+    letters: {
+      label: 'سرواژه فقط از این نویسه‌ها', example: 'ابدر',
+      hint: 'کل سرواژه فقط از این نویسه‌ها ساخته شود؛ هر نویسه می‌تواند تکرار شود.',
+    },
+    length: {
+      label: 'طول مشخص سرواژه', example: '۴',
+      hint: '۱ تا ۱۰۰ نویسه در کل سرواژه؛ فاصله، نیم‌فاصله و اعراب هم شمرده می‌شوند.',
+    },
+    'min-length': {
+      label: 'کمترین طول سرواژه', example: '۳',
+      hint: 'کمترین تعداد نویسه در کل سرواژه؛ ۱ تا ۱۰۰.',
+    },
+    'max-length': {
+      label: 'بیشترین طول سرواژه', example: '۷',
+      hint: 'بیشترین تعداد نویسه در کل سرواژه؛ ۱ تا ۱۰۰.',
+    },
+    'length-range': {
+      label: 'بازهٔ طول سرواژه', example: '۳-۷',
+      hint: 'تعداد نویسه‌های کل سرواژه؛ از کم به زیاد، بین ۱ و ۱۰۰.',
+    },
+    regex: {
+      label: 'الگوی دلخواه (Regex)', example: '^یاد',
+      hint: 'الگو روی سرواژه یا ترکیب اجرا می‌شود؛ ^ و $ آغاز و پایان سرواژه‌اند. الگو را بدون / بنویسید.',
+    },
+  },
+  meaningHelpers: {
+    contains: { hint: '«یاد» در «یادگار» هم پیدا می‌شود. برای واژهٔ مستقل، «دارای واژه یا عبارت کامل» را برگزینید.' },
+    starts: { label: 'دارای واژه‌ای با این آغاز', hint: 'آغاز یک واژه در متن معنی سنجیده می‌شود؛ «یاد» در «یادگار» پیدا می‌شود.' },
+    ends: { label: 'دارای واژه‌ای با این پایان', hint: 'پایان یک واژه در متن معنی سنجیده می‌شود؛ «گار» در «یادگار» پیدا می‌شود.' },
+    excludes: { label: 'بدون این نوشته در معنی', hint: 'اگر این نوشته در هر جای معنی‌های انتخاب‌شده آمده باشد، نتیجه حذف می‌شود.' },
+    whole: { label: 'دارای واژه یا عبارت کامل', hint: '«یاد» واژهٔ مستقل «یاد» را می‌یابد. عبارت چندواژه‌ای هم باید از آغاز یک واژه تا پایان یک واژه باشد.' },
+    regex: { label: 'الگوی دلخواه در معنی (Regex)', hint: 'در متن معنی، ^ و $ مرز واژه‌اند؛ ^یاد واژه‌هایی مثل «یادگار» را می‌یابد. الگو می‌تواند چند واژه را در بر بگیرد. برای حذف نوشته، شرط «بدون این نوشته در معنی» را برگزینید. الگو را بدون / بنویسید.' },
+  },
+  bothHelpers: {
+    contains: { hint: 'نوشته در سرواژه یا متن معنی پیدا شود؛ «یاد» در «یادگار» هم پیدا می‌شود. برای نوشتهٔ مستقل، «سرواژهٔ کامل یا واژهٔ کامل در معنی» را برگزینید.' },
+    starts: { label: 'آغاز سرواژه یا واژه‌ای در معنی', hint: 'در سرواژه، آغاز کل سرواژه سنجیده می‌شود؛ در متن معنی، آغاز یک واژه. برای تعیین یکی از این دو، جای جستجو را تغییر دهید.' },
+    ends: { label: 'پایان سرواژه یا واژه‌ای در معنی', hint: 'در سرواژه، پایان کل سرواژه سنجیده می‌شود؛ در متن معنی، پایان یک واژه.' },
+    whole: { label: 'سرواژهٔ کامل یا واژهٔ کامل در معنی', hint: 'در سرواژه، کل واژه یا ترکیب برابر باشد؛ در معنی، واژه یا عبارت مستقل پیدا شود.' },
+    regex: { hint: 'الگو در سرواژه و متن معنی جداگانه اجرا می‌شود؛ ^ و $ در سرواژه مرز کل سرواژه و در معنی مرز واژه‌اند. برای حذف نوشته، جای جستجو را روی سرواژه یا معنی بگذارید. الگو را بدون / بنویسید.' },
+  },
+  controls: {
+    clearRules: 'پاک کردن شرط‌های جستجو',
+    text: 'نوشته',
+    length: 'تعداد نویسه‌ها',
+  },
+  guide: {
+    scopedExample: 'sarvǎže:/^ک/u AND cem:/^آموزش$/u',
+    builder: 'ابتدا جای جستجوی هر شرط را برگزینید؛ شرط‌های متن معنی با سرواژه فرق دارند. طول، حروف مجاز، جای خالی، «آغاز نشود» و «پایان نیابد» فقط برای سرواژه یا ترکیب‌اند. شرط‌های خالی نادیده گرفته می‌شوند.',
+    completeWords: '«یاد» «یادگار» را هم می‌یابد؛ «یاد » پس از «یاد» فاصله می‌خواهد. در سرواژه، «برابری با کل سرواژه» تمام واژه یا ترکیب را می‌سنجد؛ در معنی، «دارای واژه یا عبارت کامل» وجود نوشتهٔ مستقل را می‌خواهد.',
+    meaningWords: 'در متن معنی، «دارای واژه‌ای با این آغاز/پایان» یک واژه درون توضیح را می‌سنجد. برای «بدون این نوشته»، جای جستجو را روی سرواژه یا متن معنی بگذارید؛ نداشتن نوشته در سرواژه، نداشتن آن در معنی را نشان نمی‌دهد.',
+    meaningPatterns: 'در معنی‌ها، ^ و $ مرز آغاز و پایان واژه‌اند؛ الگو می‌تواند چند واژه را در بر بگیرد. حرف‌های فارسی و عربی و رقم‌ها یکدست، و اعراب و نیم‌فاصله حذف می‌شوند. «بدون این نوشته» نتیجه‌هایی را حذف می‌کند که آن نوشته در معنی‌شان آمده باشد. بررسی الگوهای چندواژه‌ای و شرط‌های منفی ممکن است بیشتر طول بکشد.',
+  },
+  progress: {
+    definitions: 'بررسی معنی‌ها',
+    phrase: 'بررسی عبارت',
+    check: '{head} سرواژه · {stage}: {scanned} از {total} مدخل · {matched} نتیجه',
+  },
+  errors: {
+    scopedSyntax: 'شرط را مانند sarvǎže:/^یاد/u AND cem:/خاطر/u بنویسید.',
+    highlightCancelled: 'نمایش نتیجه لغو شد.',
+  },
+};
+
+export const formatSearchString = (template, values) => template.replace(/\{(\w+)\}/g, (match, key) =>
+  Object.hasOwn(values, key) ? String(values[key]) : match);
+
 const QUOTES = new Map([['"', '"'], ['“', '”'], ['«', '»']]);
 const MAX_PATTERN_LENGTH = 500;
 const MAX_TAGGED_LENGTH = 4000;
 const TAG_END = '(?=[^\\n]*\\n)';
 const WORD_TAIL = '[^\\n]*$';
 const RULE_START = '(?=[^\\n]*?(?:';
+const FIELD_NAMES = { both: '', headword: 'sarvǎže', meaning: 'cem' };
+const FIELD_ALIASES = new Map([
+  ['hardo', 'both'], ['هردو', 'both'], ['either', 'both'],
+  ['sarvǎže', 'headword'], ['sarvaže', 'headword'], ['sarvazhe', 'headword'], ['سرواژه', 'headword'], ['headword', 'headword'],
+  ['cem', 'meaning'], ['چم', 'meaning'], ['معنی', 'meaning'], ['meaning', 'meaning'],
+]);
+function scopeField(text) {
+  const field = text.match(/^([\p{L}\p{M}]+)\s*:\s*/u);
+  const scope = field && FIELD_ALIASES.get(field[1].normalize('NFC'));
+  return scope ? { scope, name: field[1], length: field[0].length } : null;
+}
+function regexEnd(text, start) {
+  let inClass = false;
+  for (let at = start; at < text.length; at++) {
+    const ch = text[at];
+    if (ch === '\\') { at++; continue; }
+    if (ch === '[') inClass = true;
+    else if (ch === ']') inClass = false;
+    else if (ch === '/' && !inClass) return at;
+  }
+  return -1;
+}
+function hasScopedQuery(text) {
+  const first = text.replace(/^(?:\(\s*)*/, '');
+  if (scopeField(first)) return true;
+  if (!first.startsWith('/')) return false;
+  if (first !== text) return true;
+  const end = regexEnd(text, 1);
+  return end >= 0 && /^[A-Za-z]*\s+(?:AND|OR)(?![A-Za-z])/.test(text.slice(end + 1));
+}
 export const SEARCH_SCOPES = [
-  ['both', 'واژه و معنی', 'either'],
-  ['headword', 'واژه یا ترکیب', 'headword'],
-  ['meaning', 'معنی', 'meaning'],
+  ['both', SEARCH_STRINGS.scopes.both, FIELD_NAMES.both],
+  ['headword', SEARCH_STRINGS.scopes.headword, FIELD_NAMES.headword],
+  ['meaning', SEARCH_STRINGS.scopes.meaning, FIELD_NAMES.meaning],
 ];
+const HEADWORD_HELPERS = new Set(['not-starts', 'not-ends', 'wildcard', 'letters', 'length', 'min-length', 'max-length', 'length-range']);
+
+export function getSearchHelpers(scope = 'both') {
+  const overrides = scope === 'meaning' ? SEARCH_STRINGS.meaningHelpers : scope === 'both' ? SEARCH_STRINGS.bothHelpers : {};
+  return Object.entries(SEARCH_STRINGS.helpers)
+    .filter(([kind]) => scope === 'headword' || !HEADWORD_HELPERS.has(kind) && (scope !== 'both' || kind !== 'excludes'))
+    .map(([kind, text]) => {
+      const { label, example, hint } = { ...text, ...overrides[kind] };
+      return [kind, label, example, hint];
+    });
+}
+
+export function adaptSearchHelperRule(rule, scope = rule.scope || 'both', flags = 'u', source) {
+  const next = { ...rule, ...(rule.scope || scope !== 'both' ? { scope } : {}) };
+  if (getSearchHelpers(scope).some(([kind]) => kind === rule.kind)) return next;
+  if (!String(rule.value).trim()) return { ...next, kind: 'contains', value: '' };
+  try {
+    return { ...next, kind: 'regex', value: source ?? parseSearchQuery(buildSearchQuery(rule.kind, rule.value, {}, rule.flags || flags)).source };
+  } catch {
+    return { ...next, kind: 'contains' };
+  }
+}
+
+export function readSearchHelperBuilder(input) {
+  const current = readSearchBuilder(input), sources = [];
+  const collect = (node) => node.rules ? node.rules.forEach(collect) : sources.push(node.query.source);
+  if (current.query.mode === 'scoped') collect(current.query.expression);
+  else if (current.groups.flatMap((group) => group.rules).length === 1) sources.push(current.query.source);
+  let index = 0;
+  return { ...current, groups: current.groups.map((group) => ({ ...group,
+    rules: group.rules.map((rule) => adaptSearchHelperRule(rule, rule.scope || 'both', current.query.flags || 'u', sources[index++])),
+  })) };
+}
 const activeRule = (rule) => rule.kind === 'exact' ? String(rule.value).length : String(rule.value).trim();
 export const SEARCH_TAGS = [...ENTRY_TAGS, ...SENSE_TAGS];
 export const SEARCH_FILTER_TAGS = [...SEARCH_TAGS.filter((tag) => !tag.aliasOf), ...SOURCE_TAGS];
@@ -32,7 +208,7 @@ export function parseSearchQuery(input) {
     }
     return { mode: 'exact', text: text.slice(1, -1) };
   }
-  if (/^\(*\s*(?:headword|meaning|either)\s*:/.test(text)) return parseScopedQuery(text);
+  if (hasScopedQuery(text)) return parseScopedQuery(text);
   if (!text.startsWith('/')) return { mode: 'text', text };
   const end = text.lastIndexOf('/');
   if (end === 0) throw new Error('الگو را با / ببندید؛ مانند /^یاد/.');
@@ -52,14 +228,13 @@ export function parseSearchQuery(input) {
   return { mode: 'regex', source, flags };
 }
 
-// Scoped conditions use explicit field names rather than pretending that one
-// regex can match a headword and its indexed meanings at the same time.
-function parseScopedQuery(text) {
+// Each condition has an optional field prefix; bare regexes search both fields.
+function parseScopedQuery(text, fields) {
   if (text.length > MAX_TAGGED_LENGTH) throw new Error('شرط‌های جستجو بیش از اندازه طولانی‌اند.');
   let at = 0;
   let count = 0;
   let depth = 0;
-  const invalid = () => { throw new Error('شرط را مانند headword:/^یاد/u AND meaning:/خاطر/u بنویسید.'); };
+  const invalid = () => { throw new Error(SEARCH_STRINGS.errors.scopedSyntax); };
   const space = () => { while (/\s/.test(text[at] || '') && at < text.length) at++; };
   const join = (match, a, b) => ({ match, rules: [a, b].flatMap((node) => node.match === match ? node.rules : [node]) });
   const atom = () => {
@@ -73,24 +248,19 @@ function parseScopedQuery(text) {
       depth--;
       return node;
     }
-    const field = text.slice(at).match(/^(headword|meaning|either)\s*:\s*/);
-    if (!field) invalid();
-    at += field[0].length;
+    const field = scopeField(text.slice(at));
+    if (field) {
+      fields?.push({ start: at, end: at + (FIELD_NAMES[field.scope] ? field.name.length : field.length), scope: field.scope });
+      at += field.length;
+    }
     const start = at;
     if (text[at++] !== '/') invalid();
-    let inClass = false;
-    for (; at < text.length; at++) {
-      const ch = text[at];
-      if (ch === '\\') { at++; continue; }
-      if (ch === '[') inClass = true;
-      else if (ch === ']') inClass = false;
-      else if (ch === '/' && !inClass) break;
-    }
-    if (at === text.length) invalid();
-    at++;
+    const end = regexEnd(text, at);
+    if (end < 0) invalid();
+    at = end + 1;
     while (/[a-z]/i.test(text[at] || '') && at < text.length) at++;
     if (++count > 32) throw new Error('حداکثر ۳۲ شرط جستجو بسازید.');
-    return { scope: field[1] === 'either' ? 'both' : field[1], query: parseSearchQuery(text.slice(start, at)) };
+    return { scope: field?.scope || 'both', query: parseSearchQuery(text.slice(start, at)) };
   };
   const operation = (word) => {
     space();
@@ -116,6 +286,15 @@ function parseScopedQuery(text) {
     hasMeanings: groups.some((group) => group.rules.some((node) => node.scope !== 'headword')) };
 }
 
+export function canonicalizeSearchQuery(input) {
+  let text = String(input).trim();
+  if (!hasScopedQuery(text)) return input;
+  const fields = [];
+  parseScopedQuery(text, fields);
+  for (const field of fields.reverse()) text = text.slice(0, field.start) + FIELD_NAMES[field.scope] + text.slice(field.end);
+  return text;
+}
+
 function scopedGroups(tree) {
   if (!tree.rules) return [{ match: 'all', rules: [tree] }];
   if (tree.rules.every((node) => !node.rules)) return [{ match: tree.match, rules: tree.rules }];
@@ -130,7 +309,7 @@ export function buildScopedQuery(groups, match = 'any', flags = 'u') {
     const rules = group.rules.filter(activeRule).map((rule) => {
       const field = SEARCH_SCOPES.find(([scope]) => scope === (rule.scope || 'both'));
       if (!field) throw new Error('جای جستجو شناخته نشد.');
-      return `${field[2]}:${buildSearchQuery(rule.kind, rule.value, {}, rule.flags || flags)}`;
+      return `${field[2] ? field[2] + ':' : ''}${buildSearchQuery(rule.kind, rule.value, {}, rule.flags || flags)}`;
     });
     return rules.length ? [rules.length === 1 ? rules[0] : `(${rules.join(group.match === 'any' ? ' OR ' : ' AND ')})`] : [];
   });
@@ -293,6 +472,7 @@ export function buildCombinedQuery(groups, match = 'any', filters = {}, flags = 
 // Changing independent tag controls must not turn ordinary text or quoted input
 // into a regex. Only editing word rules changes the search syntax.
 export function buildWordQuery(groups, match = 'any', flags = 'u', original = '') {
+  original = canonicalizeSearchQuery(original);
   const current = readSearchBuilder(original);
   const originalFlags = current.query.mode === 'regex' || current.query.mode === 'scoped' ? current.query.flags : 'u';
   const activeGroups = (groups) => groups.map((group) => ({ ...group, rules: group.rules.filter(activeRule).map((rule) => {

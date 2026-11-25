@@ -2,7 +2,7 @@ import * as store from './store.js';
 import { renderMeaning, meaningText, markTerms, markMatch, markLiteral, markRanges, highlightWord, esc } from './render.js';
 import { copyText, shareText, isNative, isElectron, plugin } from './platform.js';
 import { normalizeCompact, normalizeQuoted, quotedMatch, termTester } from './normalize.js';
-import { parseSearchQuery, buildWordQuery, readSearchBuilder, SEARCH_FILTER_TAGS, SEARCH_SCOPES, hasTagFilters, separateSearchFilters } from './search-syntax.js';
+import { parseSearchQuery, buildWordQuery, readSearchHelperBuilder, getSearchHelpers, adaptSearchHelperRule, canonicalizeSearchQuery, SEARCH_STRINGS, formatSearchString, SEARCH_FILTER_TAGS, SEARCH_SCOPES, hasTagFilters, separateSearchFilters } from './search-syntax.js';
 import { ENTRY_TAGS, compatibleTagIndex } from './search-origin-grammar.js';
 import { SENSE_TAGS, compatibleSenseIndex, readOpeningTags, splitSenses } from './search-subject-usage.js';
 import { plainMeaning, compactMatches } from './search-match-text.js';
@@ -120,6 +120,8 @@ async function runSearch(q) {
       q = legacy.q;
       el.q.value = q;
     }
+    const canonical = canonicalizeSearchQuery(q);
+    if (canonical !== q) { q = canonical; el.q.value = q; }
   } catch { /* Query validation below reports incomplete input. */ }
   const seq = ++search.seq;
   const filters = { ...search.filters };
@@ -201,7 +203,9 @@ async function runSearch(q) {
         }
         el.status.textContent = progress.stage === 'index'
           ? `${headCount(head)} واژه · جستجو در معنی‌ها: ${fa(progress.scanned)} از ${fa(progress.total)} بخش · ${fa(progress.matched)} نتیجه`
-          : `${headCount(head)} واژه · ${progress.stage === 'definitions' ? 'بررسی معنی‌ها' : 'بررسی عبارت'}: ${fa(progress.scanned)} از ${fa(progress.total)} مدخل · ${fa(progress.matched)} نتیجه`;
+          : formatSearchString(SEARCH_STRINGS.progress.check, { head: headCount(head),
+            stage: progress.stage === 'definitions' ? SEARCH_STRINGS.progress.definitions : SEARCH_STRINGS.progress.phrase,
+            scanned: fa(progress.scanned), total: fa(progress.total), matched: fa(progress.matched) });
       });
       if (seq !== search.seq) return;
       search.meaning = r.results;
@@ -245,7 +249,7 @@ function itemHTML(r, kind) {
   const extra = r.phrase ? `<span class="tag">ترکیب</span><span class="item-parent">در «${esc(r.parent)}»</span>` : '';
   return `<a class="item" href="${href}" data-id="${r.id}" data-kind="${kind}" data-w="${esc(r.w)}" data-p="${r.phrase ? 1 : 0}"${r.terms ? ` data-t="${esc(r.terms.join(' '))}"` : ''}${r.range ? ` data-s="${r.range.join(',')}"` : ''}${r.snippet && !search.highlightContext ? ' data-obs="1"' : ''}>
     <div class="item-head"><span class="item-word">${word}</span><span class="item-pron">${r.snippet ? esc(r.snippet.pron) : ''}</span>${extra}</div>
-    <div class="item-snippet">${r.snippet ? markMatch(r.snippet.text, r.snippet.match) : ''}</div></a>`;
+    <div class="item-snippet">${r.snippet ? markMatch(r.snippet.text, r.snippet.matches || r.snippet.match) : ''}</div></a>`;
 }
 
 function renderResults() {
@@ -791,25 +795,6 @@ function confirmSheet(msg, onOk) {
   );
 }
 
-const SEARCH_HELPERS = [
-  ['starts', 'آغاز شود با', 'یاد'],
-  ['ends', 'پایان یابد با', 'گار'],
-  ['contains', 'دربرگیرندهٔ نوشته', 'یاد'],
-  ['excludes', 'بدون این نوشته', 'یاد'],
-  ['not-starts', 'آغاز نشود با', 'نا'],
-  ['not-ends', 'پایان نیابد با', 'ها'],
-  ['exact', 'عبارت دقیق', 'یاد آوردن', 'فاصله‌های آغاز و پایان حفظ می‌شوند؛ عبارت چندواژه‌ای در معنی‌ها هم جستجو می‌شود.'],
-  ['whole', 'برابری کامل', 'یاد', 'کل واژه یا ترکیب برابر باشد.'],
-  ['either', 'یکی از چند گزینه', 'یاد، خاطر', 'گزینه‌ها را با ویرگول جدا کنید.'],
-  ['wildcard', 'جای خالی در واژه', 'ک?اب', '? یک نویسه و * هر تعداد نویسه است؛ ک?اب: کتاب یا کباب؛ یاد*: یاد، یادگار، یاد رفتن و…'],
-  ['letters', 'فقط از این نویسه‌ها', 'ابدر', 'یک بار نوشتن هر نویسه کافی است؛ در نتیجه می‌تواند تکرار شود.'],
-  ['length', 'طول مشخص', '۴', '۱ تا ۱۰۰ نویسه؛ در واژه‌ها، فاصله، نیم‌فاصله و اعراب هم شمرده می‌شوند. در معنی‌ها، هر واژه بدون اعراب و نیم‌فاصله سنجیده می‌شود.'],
-  ['min-length', 'کمترین طول', '۳', 'کمترین تعداد نویسه؛ ۱ تا ۱۰۰.'],
-  ['max-length', 'بیشترین طول', '۷', 'بیشترین تعداد نویسه؛ ۱ تا ۱۰۰.'],
-  ['length-range', 'بازهٔ طول', '۳-۷', 'از کم به زیاد بنویسید؛ مانند ۳-۷.'],
-  ['regex', 'الگوی دلخواه (Regex)', '^یاد', 'الگو را بدون / بنویسید یا الگوی کنونی را ویرایش کنید.'],
-];
-
 const TAG_GROUPS = [
   ['origin', 'ریشه'], ['kind', 'نوع واژه'], ['subject', 'موضوع'],
   ['usage', 'کاربرد'], ['source', 'یادکرد'],
@@ -953,22 +938,23 @@ function ruleGroupsHTML(groups) {
       <button class="link-btn" type="button" data-remove-group${groups.length === 1 ? ' disabled' : ''}>حذف گروه</button>
     </div>
     ${group.rules.map((rule, ri) => {
-      const helper = SEARCH_HELPERS.find(([kind]) => kind === rule.kind);
+      const helpers = getSearchHelpers(rule.scope);
+      const helper = helpers.find(([kind]) => kind === rule.kind);
       const numeric = ['length', 'min-length', 'max-length'].includes(rule.kind);
       const hint = helper[3] || '';
       const hintId = `rule-hint-${gi}-${ri}`;
       return `<div class="search-rule-row" data-rule="${ri}">
         <label class="field-label search-rule-scope" for="rule-scope-${gi}-${ri}">جای جستجو
-          <select class="text-input" id="rule-scope-${gi}-${ri}" data-rule-scope>${SEARCH_SCOPES.map(([scope, label]) => `<option value="${scope}"${scope === (rule.scope || 'both') ? ' selected' : ''}>${label}</option>`).join('')}</select>
+          <select class="text-input" id="rule-scope-${gi}-${ri}" data-rule-scope>${SEARCH_SCOPES.map(([scope, label]) => `<option value="${scope}"${scope === (rule.scope || 'both') ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>
         </label>
         <label class="field-label" for="rule-kind-${gi}-${ri}">نوع شرط
-          <select class="text-input" id="rule-kind-${gi}-${ri}" data-rule-kind>${SEARCH_HELPERS.map(([kind, label]) => `<option value="${kind}"${kind === rule.kind ? ' selected' : ''}>${label}</option>`).join('')}</select>
+          <select class="text-input" id="rule-kind-${gi}-${ri}" data-rule-kind>${helpers.map(([kind, label]) => `<option value="${kind}"${kind === rule.kind ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>
         </label>
-        <label class="field-label" for="rule-value-${gi}-${ri}"><span data-rule-label>${numeric ? 'تعداد نویسه‌ها' : 'نوشته'}</span>
-          <input class="text-input" id="rule-value-${gi}-${ri}" data-rule-value value="${esc(rule.value)}" placeholder="${helper[2]}" inputmode="${numeric ? 'numeric' : 'text'}" dir="${numeric || rule.kind === 'regex' || rule.kind === 'length-range' ? 'ltr' : 'rtl'}" aria-describedby="${hint ? hintId + ' ' : ''}search-builder-error" autocomplete="off" spellcheck="false" />
+        <label class="field-label" for="rule-value-${gi}-${ri}"><span data-rule-label>${esc(numeric ? SEARCH_STRINGS.controls.length : SEARCH_STRINGS.controls.text)}</span>
+          <input class="text-input" id="rule-value-${gi}-${ri}" data-rule-value value="${esc(rule.value)}" placeholder="${esc(helper[2])}" inputmode="${numeric ? 'numeric' : 'text'}" dir="${numeric || rule.kind === 'regex' || rule.kind === 'length-range' ? 'ltr' : 'rtl'}" aria-describedby="${hint ? hintId + ' ' : ''}search-builder-error" autocomplete="off" spellcheck="false" />
         </label>
         <button class="icon-btn search-remove-rule" type="button" data-remove-rule aria-label="حذف شرط ${fa(ri + 1)} از گروه ${fa(gi + 1)}">${icon('x')}</button>
-        <p class="search-guide" id="${hintId}" data-rule-hint${hint ? '' : ' hidden'}>${hint}</p>
+        <p class="search-guide" id="${hintId}" data-rule-hint${hint ? '' : ' hidden'}>${esc(hint)}</p>
       </div>`;
     }).join('')}
     <button class="link-btn" type="button" data-add-rule>+ افزودن شرط</button>
@@ -977,16 +963,16 @@ function ruleGroupsHTML(groups) {
 
 function openSearchHelp(tab) {
   let initialTab = tab || 'tags';
-  let groups = [{ match: 'all', rules: [{ kind: 'starts', value: '' }] }];
+  let groups = [{ match: 'all', rules: [{ kind: 'contains', value: '' }] }];
   let match = 'any';
   let flags = 'u';
   const filters = { ...search.filters };
   const tagMatch = { ...search.tagMatch };
   let original = el.q.value;
   try {
-    const current = readSearchBuilder(el.q.value);
-    groups = current.groups;
-    match = current.match;
+    original = canonicalizeSearchQuery(original);
+    const current = readSearchHelperBuilder(original);
+    if (original.trim()) { groups = current.groups; match = current.match; }
     if (current.query.mode === 'regex' || current.query.mode === 'scoped') {
       flags = current.query.flags;
       if (!tab) initialTab = 'pattern';
@@ -995,6 +981,7 @@ function openSearchHelp(tab) {
     // An incomplete query can still be replaced using the builder.
     original = '';
   }
+  const originalPattern = JSON.stringify([groups, match, flags]);
   openSheet(
     `<header class="search-sheet-header">
        <h3 id="search-help-title" tabindex="-1">جستجوی پیشرفته</h3>
@@ -1009,9 +996,9 @@ function openSearchHelp(tab) {
        <div class="search-builder-body">
          <section id="search-panel-tags" role="tabpanel" aria-labelledby="search-tab-tags">${tagChoicesHTML(tagMatch)}</section>
          <section id="search-panel-pattern" role="tabpanel" aria-labelledby="search-tab-pattern" hidden>
-           <p class="search-guide">شرط‌ها را ترکیب کنید؛ مانند «آغاز با ک»، «پایان با اب» و «طول ۴». برای شرط‌های جایگزین، گروه بیفزایید. شرط‌های خالی نادیده گرفته می‌شوند.</p>
-           <p class="search-guide">جای هر شرط را جدا برگزینید؛ مانند <bdi dir="ltr"><code>headword:/^ک/u AND meaning:/^آموزش$/u</code></bdi>. شرط‌های معنی می‌توانند در واژه‌های جداگانهٔ همان مدخل یا ترکیب پیدا شوند.</p>
-           <div class="search-builder-actions"><button class="btn ghost" type="button" id="search-add-group">+ افزودن گروه</button><button class="link-btn" type="button" id="search-clear-rules">پاک کردن شرط‌های واژه</button></div>
+           <p class="search-guide">${esc(SEARCH_STRINGS.guide.builder)}</p>
+           <p class="search-guide">جای هر شرط را جدا برگزینید؛ مانند <bdi dir="ltr"><code>${esc(SEARCH_STRINGS.guide.scopedExample)}</code></bdi>. شرط‌های معنی می‌توانند در واژه‌های جداگانهٔ همان مدخل یا ترکیب پیدا شوند.</p>
+           <div class="search-builder-actions"><button class="btn ghost" type="button" id="search-add-group">+ افزودن گروه</button><button class="link-btn" type="button" id="search-clear-rules">${esc(SEARCH_STRINGS.controls.clearRules)}</button></div>
            <div class="search-group-join" id="search-group-join" hidden>
              <label class="field-label" for="search-group-match">رابطهٔ گروه‌ها</label>
              <select class="text-input" id="search-group-match"><option value="any">دست‌کم یک گروه</option><option value="all">همهٔ گروه‌ها</option></select>
@@ -1022,8 +1009,9 @@ function openSearchHelp(tab) {
          <section id="search-panel-help" role="tabpanel" aria-labelledby="search-tab-help" hidden>
            <h4>عبارت و الگو</h4>
            <p class="search-guide">عبارت: <bdi dir="ltr"><code>«یاد»</code></bdi>؛ الگو: <bdi dir="ltr"><code>/^یاد/</code></bdi>. هر دو در واژه‌ها، ترکیب‌ها و معنی‌ها جستجو می‌شوند.</p>
-           <p class="search-guide"><bdi dir="ltr"><code>«یاد»</code></bdi> «یادگار» را هم می‌یابد؛ <bdi dir="ltr"><code>«یاد »</code></bdi> پس از «یاد» فاصله می‌خواهد. برای کل واژه یا ترکیب، «برابری کامل» را انتخاب کنید؛ در معنی‌ها، این شرط هر واژه را جداگانه می‌سنجد.</p>
-           <p class="search-guide">در معنی‌ها، ^ و $ مرز آغاز و پایان واژه‌اند؛ الگو می‌تواند چند واژه را در بر بگیرد. حرف‌های فارسی و عربی و رقم‌ها یکدست، و اعراب و نیم‌فاصله حذف می‌شوند. «بدون این نوشته» نتیجه‌هایی را حذف می‌کند که آن نوشته در معنی‌شان آمده باشد. بررسی الگوهای چندواژه‌ای و شرط‌های منفی ممکن است بیشتر طول بکشد.</p>
+           <p class="search-guide">${esc(SEARCH_STRINGS.guide.completeWords)}</p>
+           <p class="search-guide">${esc(SEARCH_STRINGS.guide.meaningWords)}</p>
+           <p class="search-guide">${esc(SEARCH_STRINGS.guide.meaningPatterns)}</p>
            <h4>برچسب‌ها و یادکردها</h4>
            <p class="search-guide">برای هر برچسب، هر واژه یا ترکیب یک بار شمرده می‌شود. شمارها با جستجو یا انتخاب برچسب تغییر نمی‌کنند.</p>
            <p class="search-guide">در هر دسته، «دست‌کم یکی» کافی است؛ برای الزام همه، «همهٔ انتخاب‌ها» را برگزینید. دسته‌ها با هم ترکیب می‌شوند.</p>
@@ -1093,7 +1081,7 @@ function openSearchHelp(tab) {
       let built = '';
       const update = () => {
         try {
-          built = buildWordQuery(groups, match, flags, original);
+          built = JSON.stringify([groups, match, flags]) === originalPattern ? original : buildWordQuery(groups, match, flags, original);
           preview.textContent = built || (hasTagFilters(filters) ? 'جستجو فقط با برچسب‌ها' : '');
           preview.dir = built.startsWith('/') || parseSearchQuery(built).mode === 'scoped' ? 'ltr' : 'auto';
           error.textContent = '';
@@ -1112,6 +1100,22 @@ function openSearchHelp(tab) {
         joinSelect.value = match;
       };
       const focusRule = (gi, ri) => $(`#rule-value-${gi}-${ri}`, sheet)?.focus();
+      const refreshRule = (row, rule) => {
+        const helpers = getSearchHelpers(rule.scope);
+        const helper = helpers.find(([kind]) => kind === rule.kind);
+        $('[data-rule-kind]', row).innerHTML = helpers.map(([kind, label]) => `<option value="${kind}"${kind === rule.kind ? ' selected' : ''}>${esc(label)}</option>`).join('');
+        const input = $('[data-rule-value]', row);
+        const numeric = ['length', 'min-length', 'max-length'].includes(rule.kind);
+        input.value = rule.value;
+        input.placeholder = helper[2];
+        input.inputMode = numeric ? 'numeric' : 'text';
+        input.dir = numeric || rule.kind === 'regex' || rule.kind === 'length-range' ? 'ltr' : 'rtl';
+        $('[data-rule-label]', row).textContent = numeric ? SEARCH_STRINGS.controls.length : SEARCH_STRINGS.controls.text;
+        const hint = $('[data-rule-hint]', row);
+        hint.textContent = helper[3] || '';
+        hint.hidden = !helper[3];
+        input.setAttribute('aria-describedby', `${helper[3] ? hint.id + ' ' : ''}search-builder-error`);
+      };
       container.addEventListener('input', (event) => {
         const input = event.target.closest('[data-rule-value]');
         if (!input) return;
@@ -1124,23 +1128,16 @@ function openSearchHelp(tab) {
         const gi = +event.target.closest('[data-group]').dataset.group;
         if (event.target.matches('[data-group-match]')) groups[gi].match = event.target.value;
         else if (event.target.matches('[data-rule-scope]')) {
-          const ri = +event.target.closest('[data-rule]').dataset.rule;
-          groups[gi].rules[ri].scope = event.target.value;
+          const row = event.target.closest('[data-rule]');
+          const ri = +row.dataset.rule;
+          const rule = adaptSearchHelperRule(groups[gi].rules[ri], event.target.value, flags);
+          groups[gi].rules[ri] = rule;
+          refreshRule(row, rule);
         } else if (event.target.matches('[data-rule-kind]')) {
           const row = event.target.closest('[data-rule]');
           const rule = groups[gi].rules[+row.dataset.rule];
           rule.kind = event.target.value;
-          const helper = SEARCH_HELPERS.find(([kind]) => kind === rule.kind);
-          const input = $('[data-rule-value]', row);
-          const numeric = ['length', 'min-length', 'max-length'].includes(rule.kind);
-          input.placeholder = helper[2];
-          input.inputMode = numeric ? 'numeric' : 'text';
-          input.dir = numeric || rule.kind === 'regex' || rule.kind === 'length-range' ? 'ltr' : 'rtl';
-          $('[data-rule-label]', row).textContent = numeric ? 'تعداد نویسه‌ها' : 'نوشته';
-          const hint = $('[data-rule-hint]', row);
-          hint.textContent = helper[3] || '';
-          hint.hidden = !helper[3];
-          input.setAttribute('aria-describedby', `${helper[3] ? hint.id + ' ' : ''}search-builder-error`);
+          refreshRule(row, rule);
         }
         update();
       });
@@ -1149,7 +1146,7 @@ function openSearchHelp(tab) {
         if (!button) return;
         const gi = +button.closest('[data-group]').dataset.group;
         if (button.matches('[data-add-rule]')) {
-          groups[gi].rules.push({ kind: 'contains', value: '' });
+          groups[gi].rules.push({ kind: 'contains', value: '', scope: groups[gi].rules.at(-1)?.scope || 'both' });
           draw();
           focusRule(gi, groups[gi].rules.length - 1);
         } else if (button.matches('[data-remove-rule]')) {
@@ -1176,7 +1173,7 @@ function openSearchHelp(tab) {
         update();
       };
       $('#search-clear-rules', sheet).onclick = () => {
-        groups = [{ match: 'all', rules: [{ kind: 'starts', value: '' }] }];
+        groups = [{ match: 'all', rules: [{ kind: 'contains', value: '' }] }];
         match = 'any';
         draw();
         focusRule(0, 0);

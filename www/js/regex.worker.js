@@ -2,7 +2,7 @@
 // The search worker keeps dictionary data and other queries available.
 import { entryTagText, matchesEntryTags } from './search-origin-grammar.js';
 import { meaningPatternMatcher } from './search-meaning-pattern.js';
-import { regexSnippet, mergeMatches } from './search-match-text.js';
+import { regexSnippet, mergeMatches, takeMatches } from './search-match-text.js';
 
 function contributingRules(node, matched) {
   if (!node.rules) return matched[node.index] ? [node.index] : null;
@@ -31,25 +31,28 @@ function displayMatcher(plan) {
       meaning: leaf.scope !== 'headword' && definition.parts.length ? leaf.meaning?.(definition.parts) : null,
     }));
     const active = contributingRules(plan.tree, status.map((row) => !!(row.head || row.meaning))) || [];
-    const headRules = active.filter((index) => status[index].head && !leaves[index].negative);
-    const headMatches = mergeMatches(headRules.flatMap((index) => wordMatches(leaves[index].head, definition.word, Math.max(1, Math.floor(64 / headRules.length)))));
+    const limit = definition.entry ? 5000 : 64;
+    let headMatches;
+    if (definition.entry || definition.kind === 'h') {
+      const headRules = active.filter((index) => status[index].head && !leaves[index].negative);
+      headMatches = mergeMatches(takeMatches(headRules.map((index) => wordMatches(leaves[index].head, definition.word, limit)), limit));
+    }
+    if (definition.kind === 'h') return { headMatches };
     const meaningRules = active.filter((index) => status[index].meaning);
+    const collect = (window) => takeMatches(meaningRules.map((index) => leaves[index].meaning(definition.parts, {
+      collect: true, limit, ...(window ? { window } : {}),
+    }).matches), limit);
+    if (definition.entry) return { headMatches, matches: collect() };
     const first = meaningRules.map((index) => status[index].meaning).find((row) => row.match.end > row.match.start)
       || { part: 0, match: { start: 0, end: 0 } };
-    if (definition.kind === 'h') return { headMatches };
     const part = definition.parts[first.part] || { text: '' };
-    const snippet = regexSnippet(part.text, definition.pron, first.match, true);
-    const limit = definition.entry ? 200 : 64;
-    const matches = meaningRules.flatMap((index) => leaves[index].meaning(definition.parts, { collect: true,
-      limit: Math.max(1, Math.floor(limit / meaningRules.length)),
-      ...(definition.entry ? {} : { window: { part: first.part, from: snippet.bounds.from, to: snippet.bounds.to } }),
-    }).matches);
+    const { bounds, ...snippet } = regexSnippet(part.text, definition.pron, first.match, true);
+    const matches = collect({ part: first.part, from: bounds.from, to: bounds.to });
     const spans = mergeMatches(matches.filter((hit) => hit.part === first.part).map((hit) => ({
-      start: snippet.bounds.prefix + Math.max(snippet.bounds.from, hit.match.start) - snippet.bounds.from,
-      end: snippet.bounds.prefix + Math.min(snippet.bounds.to, hit.match.end) - snippet.bounds.from,
+      start: bounds.prefix + Math.max(bounds.from, hit.match.start) - bounds.from,
+      end: bounds.prefix + Math.min(bounds.to, hit.match.end) - bounds.from,
     })), snippet.text.length);
-    delete snippet.bounds;
-    return { headMatches, matches, snippet: { ...snippet, matches: spans } };
+    return { snippet: { ...snippet, matches: spans } };
   };
 }
 

@@ -1,7 +1,7 @@
 // Service worker for the web build: the app shell is precached; dictionary data files are
 // cached the first time they are used (or all at once from Settings), so the web version
 // keeps working offline.
-const SHELL = 'yaad-shell-v5';
+const SHELL = 'yaad-shell-v6';
 const DATA = 'yaad-data-v1';
 const SHELL_FILES = [
   './',

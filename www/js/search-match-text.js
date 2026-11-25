@@ -24,6 +24,16 @@ export function regexSnippet(text, pron, match, bounds = false) {
   };
 }
 
+// Reserve one occurrence per rule before spending the remaining display budget.
+export function takeMatches(groups, limit) {
+  const matches = groups.flatMap((group) => group.slice(0, 1)).slice(0, limit);
+  for (const group of groups) {
+    if (matches.length >= limit) break;
+    matches.push(...group.slice(1, limit - matches.length + 1));
+  }
+  return matches;
+}
+
 export function mergeMatches(matches, length = Infinity) {
   const sorted = (matches || []).filter((match) => match && Number.isFinite(match.start) && Number.isFinite(match.end))
     .map(({ start, end }) => ({ start: Math.max(0, start), end: Math.min(length, end) }))

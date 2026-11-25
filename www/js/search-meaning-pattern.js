@@ -1,4 +1,5 @@
 import { NORM_TABLE } from './normalize.js';
+import { takeMatches } from './search-match-text.js';
 
 const fold = (char) => {
   const code = char.codePointAt(0);
@@ -93,7 +94,20 @@ for (let code = 128; code <= 0xffff; code++) {
 }
 const foldingPattern = new RegExp(`[${foldedCharacters.join('')}]`, 'g');
 
-function originalMatch(text, match) {
+function originalPositions(text, length) {
+  const positions = new Uint32Array(length + 1);
+  let position = 0;
+  for (let at = 0; at < text.length;) {
+    const char = String.fromCodePoint(text.codePointAt(at));
+    for (let i = 0; i < fold(char).length; i++) positions[position++] = at;
+    at += char.length;
+  }
+  positions[position] = text.length;
+  return positions;
+}
+
+function originalMatch(text, match, positions) {
+  if (positions) return { start: positions[match.index], end: positions[match.index + match[0].length] };
   let start = text.length, end = text.length, position = 0;
   for (let at = 0; at < text.length;) {
     const char = String.fromCodePoint(text.codePointAt(at));
@@ -148,39 +162,40 @@ export function meaningPatternMatcher(plan) {
     evidence = matches.find((row) => row.evidence)?.evidence;
     const first = evidence || { part: 0, match: { start: 0, end: 0 } };
     if (!collect) return first;
-    const found = [];
-    const rulesCount = groups.reduce((count, group, gi) => count + (matches[gi].accepted ? group.rules.filter((rule, ri) => matches[gi].results[ri].accepted && !rule.negative).length : 0), 0);
-    const perRule = Math.max(1, Math.floor(limit / (rulesCount || 1)));
-    for (let group = 0; group < groups.length && found.length < limit; group++) {
+    const collected = [], positions = [];
+    for (let group = 0; group < groups.length; group++) {
       if (!matches[group].accepted) continue;
-      for (let index = 0; index < groups[group].rules.length && found.length < limit; index++) {
+      for (let index = 0; index < groups[group].rules.length; index++) {
         const rule = groups[group].rules[index];
         if (!matches[group].results[index].accepted || rule.negative || rule.wholeText && rule.source.startsWith('^(?!')) continue;
-        const end = Math.min(limit, found.length + perRule);
+        const found = [];
+        collected.push(found);
         const re = new RegExp(rule.re.source, rule.re.flags + 'g');
-        for (let part = 0; part < parts.length && found.length < end; part++) {
+        for (let part = 0; part < parts.length && found.length < limit; part++) {
           if (window && window.part !== part) continue;
           const from = window ? parts[part].text.slice(0, window.from).replace(foldingPattern, fold).length : 0;
           const to = window ? parts[part].text.slice(0, window.to).replace(foldingPattern, fold).length : normalized[part].length;
           const targets = rule.wordOnly ? normalized[part].matchAll(/[\p{L}\p{N}_]+/gu) : [{ 0: normalized[part], index: 0 }];
           for (const target of targets) {
-            if (target.index + target[0].length < from || target.index > to) continue;
+            if (target.index + target[0].length < from) continue;
+            if (target.index >= to) break;
             re.lastIndex = Math.max(0, from - target.index);
             let match;
-            while (found.length < end && (match = re.exec(target[0]))) {
+            while (found.length < limit && (match = re.exec(target[0]))) {
               if (match.index + target.index >= to) break;
               if (!match[0].length) {
                 re.lastIndex = match.index + (target[0].codePointAt(match.index) > 0xffff ? 2 : 1);
                 continue;
               }
               match.index += target.index;
-              found.push({ part, match: originalMatch(parts[part].text, match) });
+              positions[part] ||= originalPositions(parts[part].text, normalized[part].length);
+              found.push({ part, match: originalMatch(parts[part].text, match, positions[part]) });
             }
-            if (found.length >= end) break;
+            if (found.length >= limit) break;
           }
         }
       }
     }
-    return { ...first, matches: found };
+    return { ...first, matches: takeMatches(collected, limit) };
   };
 }

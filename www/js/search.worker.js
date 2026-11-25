@@ -6,7 +6,7 @@
 // patterns the index cannot represent are checked against definition text.
 // Meaning blocks are fetched on demand and kept in a small LRU cache.
 import { normalizeCompact, normalizeSpaced, normalizeQuoted, quotedMatch, tokenize, termTester } from './normalize.js';
-import { parseSearchQuery, isTaggedPattern, quotedIndexTerms, readHeadwordRegex, readMeaningRegex, hasTagFilters, readSearchBuilder, buildSearchQuery } from './search-syntax.js';
+import { parseSearchQuery, isTaggedPattern, quotedIndexTerms, readHeadwordRegex, readMeaningRegex, hasTagFilters, readSearchBuilder, buildSearchQuery, SEARCH_STRINGS } from './search-syntax.js';
 import { compatibleTagIndex, tagFilterMasks, matchesEntryTags } from './search-origin-grammar.js';
 import { plainMeaning, regexSnippet, compactMatches } from './search-match-text.js';
 import { compatibleSenseIndex, SENSE_TAGS, normalizeSenseFilters, hasSenseFilters, planSenseFilters } from './search-subject-usage.js';
@@ -838,7 +838,7 @@ function displayTask(run) {
   const task = { cancelled: false, cleanup: null, cancel() {
     task.cancelled = true;
     task.cleanup?.();
-    rejectCancelled(new Error('نمایش نتیجه لغو شد.'));
+    rejectCancelled(new Error(SEARCH_STRINGS.errors.highlightCancelled));
   } };
   displayJobs.add(task);
   return Promise.race([run(task), cancelled]).finally(() => {
@@ -875,15 +875,15 @@ function displayPlan(q) {
   return displayPlanCache;
 }
 
-// Extra highlight work is restricted to requested rows; search result selection
-// and index scans do not retain or enumerate additional occurrences.
+// Preview collection stays inside the visible snippet. Only an opened entry
+// enumerates occurrences throughout its selected meanings.
 function displayHighlights({ q, filters = {}, tagMatch = {}, requests, entry = false }) {
   return displayTask(async (task) => {
     const { query, plan } = displayPlan(q);
     const meanings = plan.leaves.some((leaf) => leaf.scope !== 'headword') && requests.some((row) => row.kind !== 'h');
     const scoped = query.mode === 'scoped';
     const context = meanings && (scoped || hasTagFilters(filters)) ? await filterContext(filters, tagMatch, false, true, scoped) : null;
-    if (task.cancelled) throw new Error('نمایش نتیجه لغو شد.');
+    if (task.cancelled) throw new Error(SEARCH_STRINGS.errors.highlightCancelled);
     const wanted = new Set(requests.map((row) => row.id));
     const rowsByEntry = new Map();
     for (let i = 0; i < (context?.rows?.length || 0); i++) {
@@ -896,7 +896,7 @@ function displayHighlights({ q, filters = {}, tagMatch = {}, requests, entry = f
     for (let offset = 0; offset < requests.length; offset += 40) {
       const batch = requests.slice(offset, offset + 40);
       const records = new Map(await Promise.all([...new Set(batch.map((row) => row.id))].map(async (id) => [id, await getRecord(id)])));
-      if (task.cancelled) throw new Error('نمایش نتیجه لغو شد.');
+      if (task.cancelled) throw new Error(SEARCH_STRINGS.errors.highlightCancelled);
       const definitions = batch.map((request) => {
         const { body, pron } = records.get(request.id);
         const word = request.word || words.display[request.id];
@@ -910,12 +910,11 @@ function displayHighlights({ q, filters = {}, tagMatch = {}, requests, entry = f
         return { word, pron, parts, kind: request.kind, entry };
       });
       const { highlights } = await run({ highlight: plan, definitions });
-      if (task.cancelled) throw new Error('نمایش نتیجه لغو شد.');
+      if (task.cancelled) throw new Error(SEARCH_STRINGS.errors.highlightCancelled);
       for (let i = 0; i < batch.length; i++) {
         const request = batch[i], found = highlights[i];
-        const { body } = records.get(request.id);
-        if (entry) result.push({ headMatches: found.headMatches, matches: compactMatches(body, definitions[i].parts, found.matches), word: definitions[i].word });
-        else if (request.kind === 'h') result.push({ key: request.key, ...await snippet(request.id, [], false, '', undefined, records.get(request.id)), headMatches: found.headMatches });
+        if (entry) result.push({ headMatches: found.headMatches, matches: compactMatches(records.get(request.id).body, definitions[i].parts, found.matches), word: definitions[i].word });
+        else if (request.kind === 'h') result.push({ key: request.key, ...await snippet(request.id, [], false, '', request.range, records.get(request.id)), headMatches: found.headMatches });
         else result.push({ key: request.key, id: request.id, ...found.snippet });
       }
     }
@@ -1427,7 +1426,8 @@ const handlers = {
   },
   async highlights({ id, q, filters, tagMatch, word }) {
     await ready;
-    return (await displayHighlights({ q, filters, tagMatch, requests: [{ id, word, kind: 'm' }], entry: true }))[0];
+    cancelDisplayJobs();
+    return (await displayHighlights({ q, filters, tagMatch, requests: [{ id, word }], entry: true }))[0];
   },
   async lookup({ word }) {
     // Resolve a headword to entry ids (exact matches), used for stored list items.
